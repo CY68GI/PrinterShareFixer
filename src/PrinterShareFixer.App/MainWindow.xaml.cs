@@ -54,7 +54,23 @@ public sealed partial class MainWindow : Window
 
         StepList.ItemsSource = _steps;
         RootGrid.Loaded += OnRootGridLoaded;
-        Closed += (_, _) => _log.Dispose();
+        try
+        {
+            // 关闭窗口时立刻取消正在进行的修复，避免后台残留进程
+            AppWindow.Closing += (_, _) => _cancellation?.Cancel();
+        }
+        catch
+        {
+            // 拿不到 AppWindow 时忽略
+        }
+
+        Closed += OnWindowClosed;
+    }
+
+    private void OnWindowClosed(object sender, WindowEventArgs args)
+    {
+        _cancellation?.Cancel();
+        _log.Dispose();
     }
 
     // ---------- 启动与图标 ----------
@@ -172,6 +188,9 @@ public sealed partial class MainWindow : Window
     {
         DetectRing.IsActive = true;
         RefreshButton.IsEnabled = false;
+        // 检测期间先禁用修复按钮，避免和检测同时读取系统状态
+        Win10Button.IsEnabled = false;
+        Win11Button.IsEnabled = false;
         AdminInfoBar.Severity = InfoBarSeverity.Informational;
         AdminInfoBar.Title = "正在检测系统状态…";
         AdminInfoBar.Message = "读取服务、防火墙与注册表状态，请稍候。";
@@ -414,6 +433,8 @@ public sealed partial class MainWindow : Window
         _cancellation = new CancellationTokenSource();
         Win10Button.IsEnabled = false;
         Win11Button.IsEnabled = false;
+        RoleProviderButton.IsEnabled = false;
+        RoleConsumerButton.IsEnabled = false;
         RefreshButton.IsEnabled = false;
         CancelButton.Visibility = Visibility.Visible;
         ResultInfoBar.IsOpen = false;
@@ -452,7 +473,12 @@ public sealed partial class MainWindow : Window
         try
         {
             var engine = new RepairEngine(_log);
-            report = await engine.RunAsync(profile, options, progress, _cancellation.Token);
+            var token = _cancellation.Token;
+
+            // 关键：整个修复流程放到后台线程执行。
+            // 修复步骤里包含大量同步等待（启动 PowerShell、读 WMI、读写注册表），
+            // 如果在界面线程上跑，窗口会完全卡死、进度不刷新、取消和关闭都失效。
+            report = await Task.Run(() => engine.RunAsync(profile, options, progress, token), token);
         }
         catch (OperationCanceledException)
         {
@@ -472,6 +498,8 @@ public sealed partial class MainWindow : Window
             CancelButton.Visibility = Visibility.Collapsed;
             _cancellation.Dispose();
             _cancellation = null;
+            RoleProviderButton.IsEnabled = true;
+            RoleConsumerButton.IsEnabled = true;
             RefreshButton.IsEnabled = true;
             _lastLogFile = report?.LogFile ?? _lastLogFile;
         }

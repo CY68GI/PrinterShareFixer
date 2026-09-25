@@ -25,6 +25,7 @@ public sealed class FileLogSink : ILogSink, IDisposable
     private readonly StreamWriter _writer;
     private readonly Action<string>? _mirror;
     private readonly object _gate = new();
+    private bool _disposed;
 
     public FileLogSink(string? filePath = null, Action<string>? mirror = null)
     {
@@ -45,13 +46,31 @@ public sealed class FileLogSink : ILogSink, IDisposable
         var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
         lock (_gate)
         {
+            // 关窗口时日志可能已被释放，此时后台步骤仍在运行，直接丢弃即可
+            if (_disposed)
+            {
+                return;
+            }
+
             _writer.WriteLine(line);
         }
 
         _mirror?.Invoke(line);
     }
 
-    public void Dispose() => _writer.Dispose();
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _writer.Dispose();
+        }
+    }
 }
 
 /// <summary>把日志写回内存，供命令行工具使用。</summary>

@@ -25,11 +25,11 @@ internal static class CommonSteps
                         "当前进程不是管理员，修复无法继续。请关闭本程序，右键选择“以管理员身份运行”后重试。"));
                 }
 
-                var snapshot = SystemSnapshot.Load(context.Log);
+                var os = context.OsInfo;
                 return Task.FromResult(StepResult.Ok(
-                    $"已获得管理员权限，目标系统：{snapshot.OsSummary}",
-                    $"检测到活动网络：{snapshot.Networks.Count} 个",
-                    $"本机已共享打印机：{snapshot.SharedPrinters.Count} 台"));
+                    $"已获得管理员权限，目标系统：{os.OsSummary}",
+                    $"系统识别：Windows {(os.IsWindows11 ? "11" : "10")}（内部版本 {os.Build}.{os.Ubr}）",
+                    "后续步骤在后台线程执行，界面保持可响应，随时可以点“取消”。"));
             },
         };
     }
@@ -464,8 +464,7 @@ internal static class CommonSteps
             ],
             Handler = (context, _) =>
             {
-                var snapshot = SystemSnapshot.Load(context.Log);
-                if (!snapshot.IsWindows11Build26100OrLater)
+                if (!context.OsInfo.IsWindows11_24H2OrLater)
                 {
                     return Task.FromResult(StepResult.Skip("当前系统低于 Windows 11 24H2，无需调整打印 RPC 传输方式。"));
                 }
@@ -506,8 +505,8 @@ internal static class CommonSteps
             Commands = ["reg add \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Printers\\WPP\" /v WindowsProtectedPrintMode /t REG_DWORD /d 0 /f"],
             Handler = (context, _) =>
             {
-                var snapshot = SystemSnapshot.Load(context.Log);
-                if (snapshot.ProtectedPrintMode != 1)
+                var current = context.Registry.GetDword(RegistryTools.WppPolicy, "WindowsProtectedPrintMode");
+                if (current != 1)
                 {
                     return Task.FromResult(StepResult.Skip("未启用受保护的打印模式，无需处理。"));
                 }
@@ -566,9 +565,9 @@ internal static class CommonSteps
             Title = "复核修复结果",
             Description = "重新读取服务、防火墙与注册表状态，确认各项设置已经生效。",
             Commands = ["Get-Service ...", "Get-NetFirewallRule ...", "reg query ..."],
-            Handler = (context, _) =>
+            Handler = (context, ct) =>
             {
-                var snapshot = SystemSnapshot.Load(context.Log);
+                var snapshot = context.RefreshSnapshot(ct);
                 var items = snapshot.ToDetectionItems(role);
                 var problems = items.Where(i => i.Status == DetectionStatus.Problem).ToList();
                 var warnings = items.Where(i => i.Status == DetectionStatus.Warning).ToList();

@@ -74,6 +74,7 @@ public sealed class RepairEngine(ILogSink log)
 
             Report(index, step, StepState.Running, "正在执行…");
 
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             StepResult result;
             try
             {
@@ -91,7 +92,8 @@ public sealed class RepairEngine(ILogSink log)
                 log.Write($"  异常：{ex}");
             }
 
-            log.Write($"  结果：{result.State} - {result.Message}");
+            stopwatch.Stop();
+            log.Write($"  结果：{result.State} - {result.Message}（用时 {stopwatch.Elapsed.TotalSeconds:F1} 秒）");
             foreach (var detail in result.Details ?? [])
             {
                 log.Write($"    · {detail}");

@@ -88,13 +88,17 @@ public sealed class SystemSnapshot
 
     public int? WorkstationRequireSecuritySignatureReg { get; init; }
 
-    public static SystemSnapshot Load(ILogSink log)
+    /// <summary>
+    /// 读取完整状态快照。内部会启动多个 PowerShell 进程（通常 5-20 秒），
+    /// 因此绝不能在界面线程上同步调用，请在后台线程中执行。
+    /// </summary>
+    public static SystemSnapshot Load(ILogSink log, CancellationToken cancellationToken = default)
     {
         var registry = new RegistryTools(log);
-        var os = ReadOs();
-        var services = QueryServices(log);
-        var firewall = QueryFirewall(log);
-        var smb = QuerySmb(log);
+        var os = SystemInfo.Read();
+        var services = QueryServices(log, cancellationToken);
+        var firewall = QueryFirewall(log, cancellationToken);
+        var smb = QuerySmb(log, cancellationToken);
 
         return new SystemSnapshot
         {
@@ -105,11 +109,11 @@ public sealed class SystemSnapshot
             Edition = os.Edition,
             IsElevated = CheckElevated(),
             Services = services,
-            Networks = QueryNetworks(log),
-            SharedPrinters = QueryPrinters(log),
-            RemotePrinters = QueryRemotePrinters(log),
-            Shares = QueryShares(log),
-            Netbios = QueryNetbios(log),
+            Networks = QueryNetworks(log, cancellationToken),
+            SharedPrinters = QueryPrinters(log, cancellationToken),
+            RemotePrinters = QueryRemotePrinters(log, cancellationToken),
+            Shares = QueryShares(log, cancellationToken),
+            Netbios = QueryNetbios(log, cancellationToken),
             CustomFirewallRules = firewall.CustomRules,
             FileAndPrinterRulesEnabled = firewall.FileAndPrinterEnabled,
             FileAndPrinterRulesTotal = firewall.FileAndPrinterTotal,
@@ -368,30 +372,7 @@ public sealed class SystemSnapshot
         }
     }
 
-    private static (string ProductName, string DisplayVersion, int Build, int Ubr, string Edition) ReadOs()
-    {
-        try
-        {
-            using var key = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64)
-                .OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
-            var product = key?.GetValue("ProductName")?.ToString() ?? "未知";
-            var display = key?.GetValue("DisplayVersion")?.ToString()
-                          ?? key?.GetValue("ReleaseId")?.ToString()
-                          ?? string.Empty;
-            var buildText = key?.GetValue("CurrentBuildNumber")?.ToString() ?? "0";
-            var ubrText = key?.GetValue("UBR")?.ToString() ?? "0";
-            var edition = key?.GetValue("EditionID")?.ToString() ?? string.Empty;
-            _ = int.TryParse(buildText, out var build);
-            _ = int.TryParse(ubrText, out var ubr);
-            return (product, display, build, ubr, edition);
-        }
-        catch
-        {
-            return ("未知", string.Empty, 0, 0, string.Empty);
-        }
-    }
-
-    private static IReadOnlyList<ServiceInfo> QueryServices(ILogSink log)
+    private static IReadOnlyList<ServiceInfo> QueryServices(ILogSink log, CancellationToken cancellationToken)
     {
         const string script = """
             Get-CimInstance -ClassName Win32_Service -ErrorAction Stop |
@@ -400,7 +381,7 @@ public sealed class SystemSnapshot
                 ConvertTo-Json -Compress
             """;
 
-        var json = RunScript(log, script, "读取服务状态");
+        var json = RunScript(log, script, "读取服务状态", cancellationToken);
         return JsonHelpers.ParseObjects(json)
             .Select(o => new ServiceInfo(
                 JsonHelpers.String(o, "Name"),
@@ -411,7 +392,7 @@ public sealed class SystemSnapshot
             .ToList();
     }
 
-    private static IReadOnlyList<NetworkProfileInfo> QueryNetworks(ILogSink log)
+    private static IReadOnlyList<NetworkProfileInfo> QueryNetworks(ILogSink log, CancellationToken cancellationToken)
     {
         const string script = """
             Get-NetConnectionProfile -ErrorAction Stop |
@@ -421,7 +402,7 @@ public sealed class SystemSnapshot
                 ConvertTo-Json -Compress
             """;
 
-        var json = RunScript(log, script, "读取网络配置");
+        var json = RunScript(log, script, "读取网络配置", cancellationToken);
         return JsonHelpers.ParseObjects(json)
             .Select(o => new NetworkProfileInfo(
                 JsonHelpers.String(o, "Name"),
@@ -431,7 +412,7 @@ public sealed class SystemSnapshot
             .ToList();
     }
 
-    private static (int FileAndPrinterEnabled, int FileAndPrinterTotal, int DiscoveryEnabled, int DiscoveryTotal, IReadOnlyList<FirewallRuleInfo> CustomRules, string? QueryError) QueryFirewall(ILogSink log)
+    private static (int FileAndPrinterEnabled, int FileAndPrinterTotal, int DiscoveryEnabled, int DiscoveryTotal, IReadOnlyList<FirewallRuleInfo> CustomRules, string? QueryError) QueryFirewall(ILogSink log, CancellationToken cancellationToken)
     {
         const string script = """
             $result = [ordered]@{
@@ -470,7 +451,7 @@ public sealed class SystemSnapshot
             $result | ConvertTo-Json -Compress -Depth 4
             """;
 
-        var json = RunScript(log, script, "读取防火墙规则");
+        var json = RunScript(log, script, "读取防火墙规则", cancellationToken);
         var root = JsonHelpers.ParseSingle(json);
         if (root is null)
         {
@@ -493,7 +474,7 @@ public sealed class SystemSnapshot
             string.IsNullOrWhiteSpace(queryError) ? null : queryError);
     }
 
-    private static (bool? ClientInsecureGuestLogons, bool? ClientRequireSecuritySignature, bool? ServerRequireSecuritySignature, bool? ServerEnableSmb1) QuerySmb(ILogSink log)
+    private static (bool? ClientInsecureGuestLogons, bool? ClientRequireSecuritySignature, bool? ServerRequireSecuritySignature, bool? ServerEnableSmb1) QuerySmb(ILogSink log, CancellationToken cancellationToken)
     {
         const string script = """
             $client = $null
@@ -508,7 +489,7 @@ public sealed class SystemSnapshot
             } | ConvertTo-Json -Compress
             """;
 
-        var json = RunScript(log, script, "读取 SMB 配置");
+        var json = RunScript(log, script, "读取 SMB 配置", cancellationToken);
         var root = JsonHelpers.ParseSingle(json);
         if (root is null)
         {
@@ -522,7 +503,7 @@ public sealed class SystemSnapshot
             JsonHelpers.Bool(root.Value, "serverEnableSmb1"));
     }
 
-    private static IReadOnlyList<NetbiosInfo> QueryNetbios(ILogSink log)
+    private static IReadOnlyList<NetbiosInfo> QueryNetbios(ILogSink log, CancellationToken cancellationToken)
     {
         const string script = """
             Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction Stop |
@@ -530,7 +511,7 @@ public sealed class SystemSnapshot
                 ConvertTo-Json -Compress
             """;
 
-        var json = RunScript(log, script, "读取网卡 NetBIOS 设置");
+        var json = RunScript(log, script, "读取网卡 NetBIOS 设置", cancellationToken);
         return JsonHelpers.ParseObjects(json)
             .Select(o => new NetbiosInfo(
                 JsonHelpers.String(o, "Description"),
@@ -539,7 +520,7 @@ public sealed class SystemSnapshot
             .ToList();
     }
 
-    private static IReadOnlyList<PrinterInfo> QueryPrinters(ILogSink log)
+    private static IReadOnlyList<PrinterInfo> QueryPrinters(ILogSink log, CancellationToken cancellationToken)
     {
         const string script = """
             Get-Printer -ErrorAction SilentlyContinue |
@@ -548,7 +529,7 @@ public sealed class SystemSnapshot
                 ConvertTo-Json -Compress
             """;
 
-        var json = RunScript(log, script, "读取已共享打印机");
+        var json = RunScript(log, script, "读取已共享打印机", cancellationToken);
         return JsonHelpers.ParseObjects(json)
             .Select(o => new PrinterInfo(
                 JsonHelpers.String(o, "Name"),
@@ -558,7 +539,7 @@ public sealed class SystemSnapshot
     }
 
     /// <summary>本机通过网络连接的共享打印机（端口以 \\\\ 开头的那些）。</summary>
-    private static IReadOnlyList<PrinterInfo> QueryRemotePrinters(ILogSink log)
+    private static IReadOnlyList<PrinterInfo> QueryRemotePrinters(ILogSink log, CancellationToken cancellationToken)
     {
         const string script = """
             Get-Printer -ErrorAction SilentlyContinue |
@@ -567,7 +548,7 @@ public sealed class SystemSnapshot
                 ConvertTo-Json -Compress
             """;
 
-        var json = RunScript(log, script, "读取已连接的共享打印机");
+        var json = RunScript(log, script, "读取已连接的共享打印机", cancellationToken);
         return JsonHelpers.ParseObjects(json)
             .Select(o => new PrinterInfo(
                 JsonHelpers.String(o, "Name"),
@@ -576,7 +557,7 @@ public sealed class SystemSnapshot
             .ToList();
     }
 
-    private static IReadOnlyList<ShareInfo> QueryShares(ILogSink log)
+    private static IReadOnlyList<ShareInfo> QueryShares(ILogSink log, CancellationToken cancellationToken)
     {
         const string script = """
             Get-SmbShare -ErrorAction SilentlyContinue |
@@ -585,7 +566,7 @@ public sealed class SystemSnapshot
                 ConvertTo-Json -Compress
             """;
 
-        var json = RunScript(log, script, "读取共享文件夹");
+        var json = RunScript(log, script, "读取共享文件夹", cancellationToken);
         return JsonHelpers.ParseObjects(json)
             .Select(o => new ShareInfo(
                 JsonHelpers.String(o, "Name"),
@@ -593,12 +574,17 @@ public sealed class SystemSnapshot
             .ToList();
     }
 
-    internal static string RunScript(ILogSink log, string script, string friendlyName)
+    internal static string RunScript(
+        ILogSink log,
+        string script,
+        string friendlyName,
+        CancellationToken cancellationToken = default)
     {
         var runner = new PowerShellRunner(log);
         try
         {
-            var result = runner.RunAsync(script, CancellationToken.None, friendlyName, 120_000)
+            // 单条查询最多等 45 秒，避免个别卡住的系统组件把整个流程拖死
+            var result = runner.RunAsync(script, cancellationToken, friendlyName, 45_000)
                 .GetAwaiter()
                 .GetResult();
             if (!result.Succeeded)
@@ -607,6 +593,10 @@ public sealed class SystemSnapshot
             }
 
             return result.StandardOutput;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

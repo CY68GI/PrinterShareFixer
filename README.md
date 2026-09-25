@@ -26,6 +26,9 @@ Windows 10 / Windows 11 两个按钮，点击后自动完成服务启用、网�
 程序通过 `app.manifest` 声明 `requireAdministrator`，启动时会自动弹出 UAC 提权提示；
 没有管理员权限时两个修复按钮会被禁用并给出提示。
 
+修复全程在后台线程执行，窗口始终可以拖动、可以点「取消」；关闭窗口会立刻取消正在进行的
+修复并退出进程（不会残留后台进程）。日志里记录了每个步骤的耗时，方便定位慢在哪一步。
+
 ## 四种修复方案
 
 **本机接有打印机（服务端）**：目标是让别的电脑能连过来。
@@ -100,7 +103,7 @@ Printer_Sharing_Troubleshooter/
 ├─ release/                      编译打包好的可直接运行程序（分发用）
 │  ├─ PrinterShareFixer-win-x64/        双击 PrinterShareFixer.exe 即可运行
 │  ├─ psfix-cli-win-x64/                 可选命令行工具
-│  ├─ PrinterShareFixer-1.1.0-win-x64.zip  一个压缩包包含全部内容，拷到其他电脑解压即用
+│  ├─ PrinterShareFixer-1.1.1-win-x64.zip  一个压缩包包含全部内容，拷到其他电脑解压即用
 │  └─ 使用说明.txt                       给最终用户的使用说明
 ├─ build/                        编译中间产物（可随时删除，不属于源码）
 ├─ build.ps1                     编译到 build/
