@@ -36,6 +36,9 @@ public sealed class RepairOptions
     /// <summary>客户端模式：清理失效的打印缓存与卡住的打印队列。</summary>
     public bool ClearStalePrintCache { get; set; } = true;
 
+    /// <summary>客户端模式：清理到目标电脑的旧 SMB 会话，并刷新 DNS / NetBIOS 名称缓存。</summary>
+    public bool CleanSmbSession { get; set; } = true;
+
     /// <summary>根据选项键判断某个步骤是否应该执行。</summary>
     public bool IsStepEnabled(string? optionKey) => optionKey switch
     {
@@ -49,6 +52,7 @@ public sealed class RepairOptions
         "backup" => BackupRegistry,
         "wpp" => DisableProtectedPrintMode,
         "clean-cache" => ClearStalePrintCache,
+        "smb-cache" => CleanSmbSession,
         _ => true,
     };
 }

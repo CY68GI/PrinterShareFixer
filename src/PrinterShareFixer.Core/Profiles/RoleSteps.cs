@@ -82,6 +82,87 @@ internal static class RoleSteps
         };
     }
 
+    /// <summary>
+    /// 客户端：清理到目标电脑的旧 SMB 会话，并刷新 DNS / NetBIOS 名称缓存。
+    /// 报 0x00000040（指定的网络名不再可用）时基本都要先做这一步。
+    /// </summary>
+    public static RepairStep ConsumerSmbSession()
+    {
+        return new RepairStep
+        {
+            Id = "consumer.smb.session",
+            Title = "清理旧的 SMB 会话与名称解析缓存（修复 0x00000040）",
+            Description = "断开本机到目标电脑的残留连接、刷新 DNS 与 NetBIOS 名称缓存；名称指向旧 IP 或会话已失效时会报“指定的网络名不再可用”。",
+            OptionKey = "smb-cache",
+            RequiresElevation = false,
+            Commands =
+            [
+                @"net use \\<目标电脑>\IPC$ /delete /y",
+                "ipconfig /flushdns",
+                "nbtstat -R",
+            ],
+            Handler = async (context, ct) =>
+            {
+                var target = context.Options.TargetHost?.Trim();
+                if (string.IsNullOrWhiteSpace(target))
+                {
+                    return StepResult.Note(
+                        "没有填写目标电脑名称或 IP，只刷新了名称解析缓存。",
+                        "在界面上填入接打印机那台电脑的名称或 IP，重新修复时会一并断开本机到它的旧连接。");
+                }
+
+                var script = SmbSessionScriptTemplate.Replace("__TARGET__", target.Replace("'", "''"));
+                var result = await context.PowerShell.RunAsync(script, ct, $"清理到 {target} 的旧连接与缓存");
+                return StatusScript.Summarize("清理完成", StatusScript.Parse(result));
+            },
+        };
+    }
+
+    private const string SmbSessionScriptTemplate = """
+        $out = New-Object System.Collections.Generic.List[string]
+        $target = '__TARGET__'
+
+        # 1) 断开到目标电脑的 IPC$ 会话（同一条会话上的共享/打印机连接会一起释放）
+        try {
+            $null = & net use "\\$target\IPC$" /delete /y 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $out.Add("FIXED|到 $target 的旧连接|已断开（如果本机原本没有连接，这一步不会有副作用）")
+            } elseif ($LASTEXITCODE -eq 2250 -or $LASTEXITCODE -eq 2) {
+                $out.Add("OK|到 $target 的旧连接|本机没有与它的连接，无需清理")
+            } else {
+                $out.Add("WARN|到 $target 的旧连接|断开失败（退出代码 $LASTEXITCODE），可能被其他程序占用")
+            }
+        } catch {
+            $out.Add("WARN|到 $target 的旧连接|$($_.Exception.Message)")
+        }
+
+        # 2) 刷新 DNS 缓存
+        try {
+            $null = & ipconfig /flushdns 2>&1
+            if ($LASTEXITCODE -eq 0) { $out.Add("FIXED|DNS 缓存|已刷新") } else { $out.Add("WARN|DNS 缓存|刷新失败（$LASTEXITCODE）") }
+        } catch {
+            $out.Add("WARN|DNS 缓存|$($_.Exception.Message)")
+        }
+
+        # 3) 重新加载 NetBIOS 名称缓存
+        try {
+            $null = & nbtstat -R 2>&1
+            if ($LASTEXITCODE -eq 0) { $out.Add("FIXED|NetBIOS 名称缓存|已重新加载") } else { $out.Add("WARN|NetBIOS 名称缓存|刷新失败（$LASTEXITCODE）") }
+        } catch {
+            $out.Add("WARN|NetBIOS 名称缓存|$($_.Exception.Message)")
+        }
+
+        # 4) 提示：确认名称当前解析到哪个 IP
+        try {
+            $ips = [System.Net.Dns]::GetHostAddresses($target) | ForEach-Object { $_.IPAddressToString }
+            $out.Add("OK|名称解析|$target 现在解析为 $($ips -join ', ')（如果和对方现在的 IP 不一致，说明缓存里还是旧地址）")
+        } catch {
+            $out.Add("WARN|名称解析|无法解析 $target（$($_.Exception.Message)）")
+        }
+
+        $out -join "`n"
+        """;
+
     /// <summary>客户端：清理失效的打印缓存与卡住的打印队列。</summary>
     public static RepairStep ConsumerCleanStale()
     {
@@ -224,13 +305,38 @@ internal static class RoleSteps
         }
         try {
             $view = & net view "\\$target" 2>&1 | Out-String
-            if ($LASTEXITCODE -eq 0 -and $view -match '\S') {
+            $code = $LASTEXITCODE
+            if ($code -eq 0 -and $view -match '\S') {
                 $out.Add("OK|共享列表|$target 上有可见的共享资源")
             } else {
-                $out.Add("ERR|共享列表|无法枚举共享：$($view.Trim())")
+                $hint = switch ($code) {
+                    2     { '找不到这台电脑：名称或 IP 填错了，或者对方不在这个网段' }
+                    5     { '访问被拒绝：对方的共享权限或账号问题' }
+                    53    { '找不到网络路径：名称没解析对、对方没开机，或被防火墙拦了' }
+                    64    { '错误 0x00000040（指定的网络名不再可用）：多为到对方的旧 SMB 会话已失效、或名称还指向旧 IP。先执行本工具的“清理旧的 SMB 会话与名称解析缓存”，再用 \\IP\共享名 试一次' }
+                    67    { '找不到网络名：共享名写错或对方取消了共享' }
+                    86    { '网络密码不正确：请用 对方电脑名\对方账号 重新输入' }
+                    1219  { '同一台电脑存在冲突的多重连接：先删掉到它的旧连接再连' }
+                    1326  { '用户名或密码错误' }
+                    default { "net view 退出代码 $code" }
+                }
+                $out.Add("ERR|共享列表|$hint")
             }
         } catch {
             $out.Add("ERR|共享列表|$($_.Exception.Message)")
+        }
+
+        # 本机到目标电脑当前有哪些 SMB 连接（连不上时先看这里）
+        try {
+            $sessions = & net use 2>&1 | Out-String
+            $hits = @($sessions -split "`n" | Where-Object { $_ -match [regex]::Escape($target) })
+            if ($hits.Count -gt 0) {
+                $out.Add("OK|本机到 $target 的 SMB 连接|$($hits.Count) 条（若怀疑会话失效，可执行【清理旧的 SMB 会话与名称解析缓存】）")
+            } else {
+                $out.Add("OK|本机到 $target 的 SMB 连接|当前没有已建立的连接（首次连接应该是这种状态）")
+            }
+        } catch {
+            $out.Add("WARN|SMB 连接|$($_.Exception.Message)")
         }
         $out -join "`n"
         """;

@@ -19,7 +19,7 @@
     <EnableDefaultAssets>false</EnableDefaultAssets>
     <!-- 使用自定义入口点（Program.cs），以便支持"更新模式"启动 -->
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
-    <Version>1.4.0</Version>
+    <Version>1.4.1</Version>
     <Product>打印机共享修复工具</Product>
     <AssemblyTitle>打印机共享修复工具</AssemblyTitle>
     <Company>PrinterShareFixer</Company>

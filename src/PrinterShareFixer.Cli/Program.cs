@@ -71,6 +71,7 @@ internal static class Program
               rpc-dynamic=true|false         放行 RPC 动态端口（默认 true）
               restart=true|false             修复后重启服务（默认 true）
               clean-cache=true|false         清理失效打印缓存与卡住的队列（默认 true，客户端）
+              smb-cache=true|false           清理到目标电脑的旧 SMB 连接与名称解析缓存（默认 true，客户端）
               smb1=true|false                启用 SMB1（默认 false，仅 Windows 10）
               wpp=true|false                 关闭受保护的打印模式（默认 false，仅 Windows 11）
             """);
@@ -375,6 +376,9 @@ internal static class Program
                     break;
                 case "clean-cache":
                     options.ClearStalePrintCache = value;
+                    break;
+                case "smb-cache":
+                    options.CleanSmbSession = value;
                     break;
             }
         }

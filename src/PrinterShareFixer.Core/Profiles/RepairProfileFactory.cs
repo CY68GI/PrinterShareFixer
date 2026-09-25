@@ -72,6 +72,7 @@ internal static class RepairProfileFactory
             CommonSteps.Firewall(allowAnyRemoteAddress: false, allowRpcDynamicPorts: true),
             CommonSteps.SmbCompatibility(),
             RoleSteps.ConsumerGuestPolicy(),
+            RoleSteps.ConsumerSmbSession(),
             CommonSteps.PrintRpcPrivacy(),
             CommonSteps.PointAndPrintPolicy(),
             RoleSteps.ConsumerCleanStale(),

@@ -280,6 +280,7 @@
                         <CheckBox x:Name="SigningCheckBox" IsChecked="True" Content="取消 SMB 签名强制（兼容老旧设备与打印机）" />
                         <CheckBox x:Name="RpcDynamicCheckBox" IsChecked="True" Content="放行打印后台处理程序使用的 RPC 动态端口 49152-65535" />
                         <CheckBox x:Name="CleanCacheCheckBox" IsChecked="True" Content="清理失效的打印缓存与卡住的打印队列（客户端问题常用）" />
+                        <CheckBox x:Name="SmbSessionCheckBox" IsChecked="True" Content="清理到目标电脑的旧 SMB 连接，并刷新 DNS / NetBIOS 名称缓存（修复 0x00000040）" />
                         <CheckBox x:Name="AnyRemoteCheckBox" Content="防火墙规则允许所有远程地址（默认仅允许本地子网）" />
                         <CheckBox x:Name="RestartCheckBox" IsChecked="True" Content="修复结束后重启 Print Spooler / Server 等服务" />
                         <CheckBox x:Name="Smb1CheckBox" Content="启用 SMB1 协议（仅 Windows 10 方案，兼容很老的设备）" />

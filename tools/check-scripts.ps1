@@ -32,8 +32,8 @@ foreach ($file in $files) {
         if ($errors.Count -gt 0) {
             $bad++
             Write-Host ("[SYNTAX ERROR] " + (Split-Path $file -Leaf) + " script #$index") -ForegroundColor Red
-            foreach ($error in ($errors | Select-Object -First 3)) {
-                Write-Host ("    line " + $error.Extent.StartLineNumber + ": " + $error.Message)
+            foreach ($parseError in ($errors | Select-Object -First 3)) {
+                Write-Host ("    line " + $parseError.Extent.StartLineNumber + ": " + $parseError.Message)
             }
 
             $lineNumber = $errors[0].Extent.StartLineNumber
