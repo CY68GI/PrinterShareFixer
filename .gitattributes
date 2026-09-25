@@ -1,0 +1,7 @@
+# 统一换行符处理；二进制资源不做转换
+* text=auto
+
+*.ico binary
+*.png binary
+*.zip binary
+*.rar binary

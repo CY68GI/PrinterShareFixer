@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="PrinterShareFixer.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="打印机共享修复工具">
+
+    <Grid x:Name="RootGrid" Padding="28,18,28,18" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 顶部：标题 + 权限状态（固定可见） -->
+        <StackPanel Grid.Row="0" Spacing="10">
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Image
+                    x:Name="HeaderIcon"
+                    Grid.Column="0"
+                    Width="46"
+                    Height="46"
+                    VerticalAlignment="Top" />
+                <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="打印机共享修复工具" Style="{StaticResource TitleTextBlockStyle}" />
+                    <TextBlock
+                        x:Name="SubtitleText"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap"
+                        Text="点击与目标电脑系统对应的按钮，一键完成服务、网络发现、防火墙与打印兼容性修复。" />
+                </StackPanel>
+            </Grid>
+            <InfoBar
+                x:Name="AdminInfoBar"
+                IsOpen="True"
+                IsClosable="False"
+                Severity="Informational"
+                Title="正在检测…"
+                Message="" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
+            <StackPanel Spacing="12">
+
+                <!-- 两个修复按钮（首要操作，放在最前面） -->
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button
+                        x:Name="Win10Button"
+                        Grid.Column="0"
+                        Click="OnWindows10Click"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Padding="18,16">
+                        <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Border
+                                    Width="38"
+                                    Height="38"
+                                    CornerRadius="19"
+                                    Background="#0F6CBD">
+                                    <TextBlock
+                                        Text="10"
+                                        FontSize="16"
+                                        FontWeight="SemiBold"
+                                        Foreground="White"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock
+                                    Text="修复 Windows 10 共享"
+                                    Style="{StaticResource SubtitleTextBlockStyle}"
+                                    VerticalAlignment="Center"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                            <TextBlock
+                                Text="服务 + 网络发现 + 防火墙放行 + 来宾访问 + 修复 0x0000011b，可选启用 SMB1。"
+                                TextWrapping="Wrap"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <Border
+                                x:Name="Win10Badge"
+                                Visibility="Collapsed"
+                                CornerRadius="10"
+                                Padding="8,2"
+                                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                HorizontalAlignment="Left">
+                                <TextBlock Text="当前系统推荐" FontSize="11" Foreground="White" />
+                            </Border>
+                        </StackPanel>
+                    </Button>
+
+                    <Button
+                        x:Name="Win11Button"
+                        Grid.Column="1"
+                        Click="OnWindows11Click"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Padding="18,16">
+                        <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Border
+                                    Width="38"
+                                    Height="38"
+                                    CornerRadius="19"
+                                    Background="#0F6CBD">
+                                    <TextBlock
+                                        Text="11"
+                                        FontSize="16"
+                                        FontWeight="SemiBold"
+                                        Foreground="White"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock
+                                    Text="修复 Windows 11 共享"
+                                    Style="{StaticResource SubtitleTextBlockStyle}"
+                                    VerticalAlignment="Center"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                            <TextBlock
+                                Text="Windows 10 全部修复项，外加 24H2 打印 RPC 变更、驱动安装限制与受保护的打印模式。"
+                                TextWrapping="Wrap"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <Border
+                                x:Name="Win11Badge"
+                                Visibility="Collapsed"
+                                CornerRadius="10"
+                                Padding="8,2"
+                                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                HorizontalAlignment="Left">
+                                <TextBlock Text="当前系统推荐" FontSize="11" Foreground="White" />
+                            </Border>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <!-- 修复结果提示 -->
+                <InfoBar
+                    x:Name="ResultInfoBar"
+                    IsOpen="False"
+                    IsClosable="True"
+                    Severity="Success"
+                    Title=""
+                    Message="" />
+
+                <!-- 修复进度 -->
+                <Border
+                    x:Name="StepsCard"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="16">
+                    <StackPanel Spacing="8">
+                        <TextBlock x:Name="StepsHeaderText" Text="修复进度" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock
+                            x:Name="StepsEmptyHint"
+                            Text="点击上方任意一个按钮开始修复，这里会逐项显示执行结果。"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                        <ItemsControl x:Name="StepList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnSpacing="10" Padding="0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <FontIcon
+                                            Grid.Column="0"
+                                            FontSize="14"
+                                            Glyph="{Binding Glyph}"
+                                            Foreground="{Binding Accent}"
+                                            VerticalAlignment="Top"
+                                            Margin="0,3,0,0" />
+                                        <StackPanel Grid.Column="1" Spacing="2">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock
+                                                Text="{Binding Message}"
+                                                TextWrapping="Wrap"
+                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <TextBlock
+                                                Text="{Binding DetailText}"
+                                                Visibility="{Binding DetailVisibility}"
+                                                TextWrapping="Wrap"
+                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- 高级选项 -->
+                <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                    <Expander.Header>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon FontSize="14" Glyph="&#xE713;" />
+                            <TextBlock Text="高级选项" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Expander.Header>
+                    <StackPanel Spacing="4" Padding="0,8,0,0">
+                        <CheckBox x:Name="BackupCheckBox" IsChecked="True" Content="修复前备份相关注册表项（推荐，便于回滚）" />
+                        <CheckBox x:Name="PasswordlessCheckBox" IsChecked="True" Content="关闭“密码保护的共享”，允许来宾访问（LSA 策略）" />
+                        <CheckBox x:Name="GuestCheckBox" IsChecked="True" Content="允许 SMB 不安全的来宾登录" />
+                        <CheckBox x:Name="SigningCheckBox" IsChecked="True" Content="取消 SMB 签名强制（兼容老旧设备与打印机）" />
+                        <CheckBox x:Name="RpcDynamicCheckBox" IsChecked="True" Content="放行打印后台处理程序使用的 RPC 动态端口 49152-65535" />
+                        <CheckBox x:Name="AnyRemoteCheckBox" Content="防火墙规则允许所有远程地址（默认仅允许本地子网）" />
+                        <CheckBox x:Name="RestartCheckBox" IsChecked="True" Content="修复结束后重启 Print Spooler / Server 等服务" />
+                        <CheckBox x:Name="Smb1CheckBox" Content="启用 SMB1 协议（仅 Windows 10 方案，兼容很老的设备）" />
+                        <CheckBox x:Name="WppCheckBox" Content="关闭 Windows 受保护的打印模式（仅 Windows 11 24H2 及以上）" />
+                    </StackPanel>
+                </Expander>
+
+                <!-- 系统状态检测（默认折叠，避免长列表挤占首屏） -->
+                <Expander x:Name="DetectionExpander" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                    <Expander.Header>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon FontSize="14" Glyph="&#xE9D9;" />
+                            <TextBlock x:Name="DetectionHeaderText" Text="系统状态检测" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Expander.Header>
+                    <StackPanel Spacing="8" Padding="0,8,0,0">
+                        <ProgressRing
+                            x:Name="DetectRing"
+                            Width="18"
+                            Height="18"
+                            IsActive="False"
+                            HorizontalAlignment="Left" />
+                        <ItemsControl x:Name="DetectionList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnSpacing="10" Padding="0,5">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <FontIcon
+                                            Grid.Column="0"
+                                            FontSize="14"
+                                            Glyph="{Binding Glyph}"
+                                            Foreground="{Binding Accent}"
+                                            VerticalAlignment="Top"
+                                            Margin="0,3,0,0" />
+                                        <StackPanel Grid.Column="1" Spacing="2">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock
+                                                Text="{Binding Detail}"
+                                                TextWrapping="Wrap"
+                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Expander>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- 底部操作栏 -->
+        <Grid Grid.Row="2" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Spacing="6" VerticalAlignment="Center">
+                <TextBlock
+                    x:Name="StatusText"
+                    Text="就绪"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" />
+                <ProgressBar x:Name="RunProgress" Value="0" Maximum="100" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <Button x:Name="CancelButton" Content="取消" Click="OnCancelClick" Visibility="Collapsed" />
+                <Button x:Name="RefreshButton" Content="重新检测" Click="OnRefreshClick" />
+                <Button x:Name="OpenLogButton" Content="打开日志" Click="OnOpenLogClick" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

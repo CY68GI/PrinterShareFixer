@@ -1,0 +1,14 @@
+﻿# build output
+build/
+bin/
+obj/
+dist/
+
+# packages produced by package.ps1 - publish them as GitHub release assets instead
+release/
+
+# IDE / editor
+.vs/
+*.user
+*.suo
+*.binlog
