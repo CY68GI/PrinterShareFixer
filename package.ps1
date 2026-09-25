@@ -1,26 +1,40 @@
 <#
-    Builds the ready-to-run package into the "release" folder.
+    Builds the ready-to-run packages into the "release" folder.
 
-    Output:
-      release\PrinterShareFixer-win-x64\       runnable app (self contained)
-      release\psfix-cli-win-x64\               optional command line tool
-      release\<guide>.txt                      usage guide copied from the repository root
-      release\PrinterShareFixer-<version>-win-x64.zip
-                                               one archive with everything, copy it anywhere
+    Two variants are produced:
 
-    The published app is x64, self contained and includes the Windows App SDK,
-    so a target computer does not need the .NET runtime or any extra installer.
+      1. self-contained   (best default download)
+         release\PrinterShareFixer-win-x64\                      runnable app
+         release\psfix-cli-win-x64\                              command line tool
+         release\PrinterShareFixer-<version>-win-x64.zip         unzip anywhere and run
+
+      2. framework dependent  (about half the size, needs the .NET 10 runtime)
+         release\PrinterShareFixer-win-x64-requires-dotnet\
+         release\psfix-cli-win-x64-requires-dotnet\
+         release\PrinterShareFixer-<version>-win-x64-requires-dotnet.zip
+
+    Both variants bundle the Windows App SDK, so the only optional dependency
+    is the .NET runtime.
+
+    Layout inside every archive:
+      <package>/PrinterShareFixer-win-x64[-requires-dotnet]/   the app
+      <package>/psfix-cli-win-x64[-requires-dotnet]/           the CLI
+      <package>/<guide>.txt                                    usage guide
+      <package>/<extra>                                        only for the slim package
 
     Usage:
       powershell -ExecutionPolicy Bypass -File .\package.ps1
-      powershell -ExecutionPolicy Bypass -File .\package.ps1 -FrameworkDependent   # needs .NET 10 on target
+      powershell -ExecutionPolicy Bypass -File .\package.ps1 -Variant FrameworkDependent
+      powershell -ExecutionPolicy Bypass -File .\package.ps1 -SkipArchive
 
-    This file is intentionally ASCII-only (see build.ps1 for the reason).
+    This file is intentionally ASCII-only: Windows PowerShell 5.1 reads .ps1
+    files without a BOM using the ANSI code page, which corrupts non-ASCII text.
 #>
 param(
     [string]$Configuration = "Release",
     [string]$RuntimeIdentifier = "win-x64",
-    [switch]$FrameworkDependent,
+    [ValidateSet('All', 'SelfContained', 'FrameworkDependent')]
+    [string]$Variant = 'All',
     [switch]$SkipArchive
 )
 
@@ -29,111 +43,195 @@ $ErrorActionPreference = 'Stop'
 
 $root = $PSScriptRoot
 $releaseRoot = "$root\release"
-$appDir = "$releaseRoot\PrinterShareFixer-$RuntimeIdentifier"
-$cliDir = "$releaseRoot\psfix-cli-$RuntimeIdentifier"
+$docsRoot = "$root\docs"
+$extraRoot = "$root\packaging"
 
-# Version comes from the app project so the archive name always matches the binaries.
 $versionMatch = [regex]::Match(
     (Get-Content "$root\src\PrinterShareFixer.App\PrinterShareFixer.App.csproj" -Raw),
     '<Version>([^<]+)</Version>')
 $version = if ($versionMatch.Success) { $versionMatch.Groups[1].Value.Trim() } else { '0.0.0' }
-$packageName = "PrinterShareFixer-$version-$RuntimeIdentifier"
-$archive = "$releaseRoot\$packageName.zip"
 
-if ($FrameworkDependent) {
-    $selfContained = "false"
-    Write-Host "Mode: framework dependent (.NET 10 desktop runtime required on the target computer)" -ForegroundColor Yellow
-} else {
-    $selfContained = "true"
-    Write-Host "Mode: self contained (target computer needs nothing extra)" -ForegroundColor Cyan
-}
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
-
-# Clean only the folders this script owns, never the release root itself.
-foreach ($dir in @($appDir, $cliDir)) {
-    if (Test-Path -LiteralPath $dir) {
-        $resolved = (Resolve-Path -LiteralPath $dir).Path
+function Remove-Safely([string]$path) {
+    if (Test-Path -LiteralPath $path) {
+        $resolved = (Resolve-Path -LiteralPath $path).Path
         if (-not $resolved.StartsWith($releaseRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to delete outside the release folder: $resolved"
         }
+
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }
 }
 
-Write-Host "== Publishing WinUI 3 app ==" -ForegroundColor Cyan
-dotnet publish "$root\src\PrinterShareFixer.App\PrinterShareFixer.App.csproj" `
-    -c $Configuration `
-    -r $RuntimeIdentifier `
-    --self-contained $selfContained `
-    -p:WindowsAppSDKSelfContained=true `
-    -p:Platform=x64 `
-    -o $appDir
+function Copy-GuideFile {
+    param([string]$Source, [string]$Destination)
 
-Write-Host "== Publishing command line tool ==" -ForegroundColor Cyan
-dotnet publish "$root\src\PrinterShareFixer.Cli\PrinterShareFixer.Cli.csproj" `
-    -c $Configuration `
-    -r $RuntimeIdentifier `
-    --self-contained $selfContained `
-    -o $cliDir
-
-# Copy the usage guide (repository root .txt) into the release folder and the app folder,
-# re-encoded as UTF-8 with BOM so Notepad shows the Chinese text correctly.
-$guide = Get-ChildItem -Path $root -Filter '*.txt' -File | Select-Object -First 1
-if ($guide) {
-    $text = Get-Content -LiteralPath $guide.FullName -Raw -Encoding UTF8
-    Set-Content -LiteralPath (Join-Path $appDir $guide.Name) -Value $text -Encoding UTF8
-    Set-Content -LiteralPath (Join-Path $releaseRoot $guide.Name) -Value $text -Encoding UTF8
-    Write-Host ("Guide copied: " + $guide.Name) -ForegroundColor Green
-} else {
-    Write-Host "No usage guide (.txt) found in the repository root." -ForegroundColor Yellow
+    $name = Split-Path -Leaf $Source
+    $target = Join-Path $Destination $name
+    if ($name -like '*.txt') {
+        # re-encode as UTF-8 with BOM so Notepad shows the Chinese text correctly
+        $text = Get-Content -LiteralPath $Source -Raw -Encoding UTF8
+        Set-Content -LiteralPath $target -Value $text -Encoding UTF8
+    } else {
+        # .bat / .url must keep their exact bytes (a BOM would break the batch file)
+        Copy-Item -LiteralPath $Source -Destination $target -Force
+    }
 }
 
-if (-not $SkipArchive) {
-    Write-Host "== Creating one archive with everything ==" -ForegroundColor Cyan
-    Add-Type -AssemblyName System.IO.Compression
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-
-    # 只保留一个压缩包：先清掉 release 根目录下旧的 .zip
-    Get-ChildItem -LiteralPath $releaseRoot -Filter '*.zip' -File -ErrorAction SilentlyContinue | ForEach-Object {
-        Remove-Item -LiteralPath $_.FullName -Force
+function Get-GuideFiles([string]$ExtraSource) {
+    $general = @()
+    if (Test-Path -LiteralPath $docsRoot) {
+        $general = @(Get-ChildItem -LiteralPath $docsRoot -Filter '*.txt' -File)
     }
 
-    $zip = [System.IO.Compression.ZipFile]::Open($archive, [System.IO.Compression.ZipArchiveMode]::Create)
-    try {
-        foreach ($mapping in @(
-                @{ Source = $appDir; Prefix = "PrinterShareFixer-$RuntimeIdentifier" },
-                @{ Source = $cliDir; Prefix = "psfix-cli-$RuntimeIdentifier" })) {
-            $base = (Resolve-Path -LiteralPath $mapping.Source).Path.TrimEnd('\')
-            $files = Get-ChildItem -LiteralPath $base -Recurse -File
-            foreach ($file in $files) {
-                $relative = $file.FullName.Substring($base.Length + 1).Replace('\', '/')
-                $entryName = "$packageName/$($mapping.Prefix)/$relative"
-                [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-                    $zip, $file.FullName, $entryName, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
-            }
-        }
+    $extra = @()
+    if ($ExtraSource -and (Test-Path -LiteralPath $ExtraSource)) {
+        $extra = @(Get-ChildItem -LiteralPath $ExtraSource -File)
+    }
 
-        if ($guide) {
-            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-                $zip, $guide.FullName, "$packageName/$($guide.Name)",
-                [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    return @{
+        General = $general
+        Extra   = $extra
+    }
+}
+
+function New-Archive {
+    param(
+        [string]$PackageName,
+        [string[]]$Sources,
+        [string]$ArchivePath
+    )
+
+    if (Test-Path -LiteralPath $ArchivePath) {
+        Remove-Item -LiteralPath $ArchivePath -Force
+    }
+
+    $zip = [System.IO.Compression.ZipFile]::Open($ArchivePath, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($source in $Sources) {
+            $resolved = (Resolve-Path -LiteralPath $source).Path
+            if (Test-Path -LiteralPath $resolved -PathType Container) {
+                $base = $resolved.TrimEnd('\')
+                $folderName = Split-Path -Leaf $base
+                # the staging folder holds files that belong to the package root,
+                # every other folder keeps its own name inside the archive
+                $prefix = if ($folderName -like '.staging*') { '' } else { "$folderName/" }
+                foreach ($file in (Get-ChildItem -LiteralPath $base -Recurse -File)) {
+                    $relative = $file.FullName.Substring($base.Length + 1).Replace('\', '/')
+                    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                        $zip, $file.FullName, "$PackageName/$prefix$relative",
+                        [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+                }
+            } else {
+                [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                    $zip, $resolved, "$PackageName/$(Split-Path -Leaf $resolved)",
+                    [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+            }
         }
     } finally {
         $zip.Dispose()
     }
 
-    $archiveMb = [math]::Round((Get-Item -LiteralPath $archive).Length / 1MB, 1)
-    Write-Host ("Created " + (Split-Path $archive -Leaf) + " ($archiveMb MB)") -ForegroundColor Green
+    return [math]::Round((Get-Item -LiteralPath $ArchivePath).Length / 1MB, 1)
 }
 
-$appFiles = (Get-ChildItem -Path $appDir -File).Count
-$appSize = [math]::Round(((Get-ChildItem -Path $appDir -File | Measure-Object Length -Sum).Sum / 1MB), 1)
+function New-Package {
+    param(
+        [string]$Suffix,
+        [bool]$SelfContained,
+        [string]$Label,
+        [string]$ExtraDocs
+    )
+
+    $appDir = "$releaseRoot\PrinterShareFixer-$RuntimeIdentifier$Suffix"
+    $cliDir = "$releaseRoot\psfix-cli-$RuntimeIdentifier$Suffix"
+    $staging = "$releaseRoot\.staging$Suffix"
+    $packageName = "PrinterShareFixer-$version-$RuntimeIdentifier$Suffix"
+    $archive = "$releaseRoot\$packageName.zip"
+
+    Write-Host "== Publishing $Label ==" -ForegroundColor Cyan
+    Remove-Safely $appDir
+    Remove-Safely $cliDir
+    Remove-Safely $staging
+
+    dotnet publish "$root\src\PrinterShareFixer.App\PrinterShareFixer.App.csproj" `
+        -c $Configuration `
+        -r $RuntimeIdentifier `
+        --self-contained $SelfContained `
+        -p:WindowsAppSDKSelfContained=true `
+        -p:Platform=x64 `
+        -p:PathMap="$root=." `
+        -o $appDir
+    if ($LASTEXITCODE -ne 0) { throw "publish failed: app ($Label)" }
+
+    dotnet publish "$root\src\PrinterShareFixer.Cli\PrinterShareFixer.Cli.csproj" `
+        -c $Configuration `
+        -r $RuntimeIdentifier `
+        --self-contained $SelfContained `
+        -p:PathMap="$root=." `
+        -o $cliDir
+    if ($LASTEXITCODE -ne 0) { throw "publish failed: cli ($Label)" }
+
+    $guides = Get-GuideFiles -ExtraSource $ExtraDocs
+
+    # the app folder carries the text guides (so a user who copies only the app
+    # folder still has the instructions)
+    $appGuides = @($guides.General) + @($guides.Extra | Where-Object { $_.Extension -eq '.txt' })
+    foreach ($file in $appGuides) {
+        Copy-GuideFile -Source $file.FullName -Destination $appDir
+    }
+
+    # the package root carries every guide, plus helper files such as the
+    # "run me" batch file and the download shortcut
+    $rootGuides = @($guides.General) + @($guides.Extra)
+    if ($rootGuides.Count -gt 0) {
+        New-Item -ItemType Directory -Force -Path $staging | Out-Null
+        foreach ($file in $rootGuides) {
+            Copy-GuideFile -Source $file.FullName -Destination $staging
+        }
+    }
+
+    Write-Host ("   app folder : " + $appDir)
+    Write-Host ("   guides     : " + $appGuides.Count + " in app folder, " + $rootGuides.Count + " at package root")
+
+    if (-not $SkipArchive) {
+        $sources = @($appDir, $cliDir)
+        if ($rootGuides.Count -gt 0) {
+            $sources += $staging
+        }
+
+        $sizeMb = New-Archive -PackageName $packageName -Sources $sources -ArchivePath $archive
+        Write-Host ("   archive    : " + (Split-Path -Leaf $archive) + " ($sizeMb MB)") -ForegroundColor Green
+    }
+
+    Remove-Safely $staging
+}
+
+New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
+
+# remove stale artifacts from earlier runs (archives and the guide copies that
+# older versions of this script left in the release root)
+foreach ($pattern in @('*.zip', '*.txt', '*.bat', '*.url')) {
+    Get-ChildItem -LiteralPath $releaseRoot -Filter $pattern -File -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Safely $_.FullName }
+}
+
+if ($Variant -eq 'All' -or $Variant -eq 'SelfContained') {
+    New-Package -Suffix '' -SelfContained $true `
+        -Label 'self contained app (no .NET runtime needed)' `
+        -ExtraDocs $null
+}
+
+if ($Variant -eq 'All' -or $Variant -eq 'FrameworkDependent') {
+    New-Package -Suffix '-requires-dotnet' -SelfContained $false `
+        -Label 'framework dependent app (needs the .NET 10 runtime)' `
+        -ExtraDocs "$extraRoot\framework-dependent"
+}
 
 Write-Host ""
-Write-Host "Done." -ForegroundColor Green
-Write-Host "App folder : $appDir ($appFiles files, $appSize MB)"
-Write-Host "CLI folder : $cliDir"
-Write-Host "Archive    : $archive"
-Write-Host "Unpack the archive on the target computer, then run" -ForegroundColor Yellow
-Write-Host "  $packageName\PrinterShareFixer-$RuntimeIdentifier\PrinterShareFixer.exe   (UAC prompt)" -ForegroundColor Yellow
+Write-Host "Done. Everything is under: $releaseRoot" -ForegroundColor Green
+Write-Host "Self contained : release\PrinterShareFixer-$version-$RuntimeIdentifier.zip"
+Write-Host "Slim (needs .NET 10) : release\PrinterShareFixer-$version-$RuntimeIdentifier-requires-dotnet.zip"
+Write-Host "Upload both zip files to the GitHub release page."

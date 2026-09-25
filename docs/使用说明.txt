@@ -73,6 +73,9 @@
         psfix run win11-consumer --yes --target 192.168.1.10
                                                 真正执行（需在管理员命令行里运行）
 
+   注意：如果你下载的是“不自带运行时”的包，运行前需要先安装 .NET 10 桌面运行时，
+   安装地址见包内的“运行前必读”说明或 https://dotnet.microsoft.com/download/dotnet/10.0
+
 七、注意事项
    · 程序没有数字签名，SmartScreen 或杀毒软件可能提示“未知发布者”，
      选择“仍要运行”即可；企业环境请先走内部白名单流程。

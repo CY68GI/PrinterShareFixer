@@ -17,6 +17,13 @@ public static class AppInfo
     /// <summary>发布说明，最新的排在前面。</summary>
     public static IReadOnlyList<ReleaseNote> ReleaseNotes { get; } =
     [
+        new("1.2.0", "2026-09-25",
+        [
+            "新增：不自带运行时的版本（framework dependent），体积更小，首次运行前需要安装 .NET 10 桌面运行时，包内附安装指引与下载链接。",
+            "仓库结构按 GitHub 约定整理：新增 LICENSE、CHANGELOG.md、docs/ 文档目录与 .github/ 工作流，发布包改由 GitHub Releases 提供。",
+            "新增：GitHub Actions 自动构建（推送到 main 或提交 PR 时编译并产出两种发布包）。",
+            "新增：psfix version --markdown 与 tools/update-changelog.ps1，用同一份更新内容生成仓库的 CHANGELOG.md。",
+        ]),
         new("1.1.2", "2026-09-25",
         [
             "修复：防火墙多端口规则写法错误（“137,139”会被系统判为无效端口），导致 NetBIOS / WSD 放行规则没能创建，现改为逐个端口传入。",

@@ -1,0 +1,53 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Check embedded PowerShell scripts
+        shell: pwsh
+        run: ./tools/check-scripts.ps1
+
+      - name: Restore
+        run: dotnet restore PrinterShareFixer.sln
+
+      - name: Build
+        run: dotnet build PrinterShareFixer.sln -c Release --no-restore
+
+      - name: Publish (framework dependent)
+        run: >
+          dotnet publish src/PrinterShareFixer.App/PrinterShareFixer.App.csproj
+          -c Release -r win-x64 --self-contained false
+          -p:WindowsAppSDKSelfContained=true -p:Platform=x64
+          -o artifacts/app-framework-dependent
+
+      - name: Publish (self contained)
+        run: >
+          dotnet publish src/PrinterShareFixer.App/PrinterShareFixer.App.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:WindowsAppSDKSelfContained=true -p:Platform=x64
+          -o artifacts/app-self-contained
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrinterShareFixer-build
+          path: artifacts
+          retention-days: 7

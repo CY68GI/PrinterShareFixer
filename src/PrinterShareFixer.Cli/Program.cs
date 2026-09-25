@@ -26,7 +26,7 @@ internal static class Program
                 "detect" => Detect(args),
                 "plan" => Plan(args),
                 "run" => await RunAsync(args).ConfigureAwait(false),
-                "version" => Version(),
+                "version" => Version(args),
                 "help" or "-h" or "--help" => Help(),
                 _ => Unknown(command),
             };
@@ -44,7 +44,7 @@ internal static class Program
             打印机共享修复工具 - 命令行版
 
             psfix detect                     检测当前机器的打印机共享相关状态（只读）
-            psfix version                    显示版本号与各版本更新内容
+            psfix version [--markdown]       显示版本号与各版本更新内容（--markdown 输出 GitHub 用的 Markdown）
             psfix plan <方案>                打印修复方案包含的步骤与等价命令
             psfix run <方案> [--yes] [--target <电脑名或IP>] [--opt key=value ...]
                                              执行修复（默认只做预演，加 --yes 才真正执行，需要管理员权限）
@@ -74,8 +74,29 @@ internal static class Program
         return 0;
     }
 
-    private static int Version()
+    private static int Version(string[] args)
     {
+        if (args.Any(arg => arg.Equals("--markdown", StringComparison.OrdinalIgnoreCase)))
+        {
+            Console.WriteLine("<!-- 本文件由 tools/update-changelog.ps1 自动生成，内容来自 src/PrinterShareFixer.Core/AppInfo.cs -->");
+            Console.WriteLine();
+            Console.WriteLine("# 更新日志");
+            Console.WriteLine();
+            foreach (var note in AppInfo.ReleaseNotes)
+            {
+                Console.WriteLine($"## [{note.Version}] - {note.Date}");
+                Console.WriteLine();
+                foreach (var line in note.Highlights)
+                {
+                    Console.WriteLine($"- {line}");
+                }
+
+                Console.WriteLine();
+            }
+
+            return 0;
+        }
+
         Console.WriteLine($"{AppInfo.ProductName}  v{AppInfo.Version}");
         Console.WriteLine();
         foreach (var note in AppInfo.ReleaseNotes)
