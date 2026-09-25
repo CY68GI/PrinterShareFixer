@@ -9,6 +9,23 @@ public sealed record NetworkProfileInfo(string Name, string InterfaceAlias, stri
 
 public sealed record PrinterInfo(string Name, string ShareName, string DriverName);
 
+/// <summary>本机打印机的一条详细信息（用于"打印机信息"页面）。</summary>
+public sealed record PrinterDetail(
+    string Name,
+    string ShareName,
+    string DriverName,
+    string PortName,
+    bool Shared,
+    bool IsRemote,
+    string Status)
+{
+    public string ShareText => Shared
+        ? (string.IsNullOrWhiteSpace(ShareName) ? "已共享" : $"已共享（{ShareName}）")
+        : "未共享";
+
+    public string PortText => IsRemote ? $"网络端口：{PortName}" : PortName;
+}
+
 public sealed record ShareInfo(string Name, string Path);
 
 public sealed record NetbiosInfo(string Description, string Addresses, int? NetbiosOption);
@@ -44,6 +61,11 @@ public sealed class SystemSnapshot
 
     /// <summary>本机已连接的远程（共享）打印机。</summary>
     public IReadOnlyList<PrinterInfo> RemotePrinters { get; init; } = [];
+
+    /// <summary>本机安装的全部打印机。</summary>
+    public IReadOnlyList<PrinterDetail> Printers { get; init; } = [];
+
+    public int SharedPrinterCount => Printers.Count(p => p.Shared);
 
     public IReadOnlyList<ShareInfo> Shares { get; init; } = [];
 
@@ -112,6 +134,7 @@ public sealed class SystemSnapshot
             Networks = QueryNetworks(log, cancellationToken),
             SharedPrinters = QueryPrinters(log, cancellationToken),
             RemotePrinters = QueryRemotePrinters(log, cancellationToken),
+            Printers = QueryAllPrinters(log, cancellationToken),
             Shares = QueryShares(log, cancellationToken),
             Netbios = QueryNetbios(log, cancellationToken),
             CustomFirewallRules = firewall.CustomRules,
@@ -535,6 +558,34 @@ public sealed class SystemSnapshot
     }
 
     /// <summary>本机通过网络连接的共享打印机（端口以 \\\\ 开头的那些）。</summary>
+    /// <summary>本机安装的全部打印机（含是否共享、端口、状态）。</summary>
+    private static IReadOnlyList<PrinterDetail> QueryAllPrinters(ILogSink log, CancellationToken cancellationToken)
+    {
+        const string script = """
+            Get-Printer -ErrorAction SilentlyContinue |
+                Select-Object Name,ShareName,DriverName,PortName,
+                    @{n='Shared';e={ [bool]$_.Shared }},
+                    @{n='Status';e={ [string]$_.PrinterStatus }} |
+                ConvertTo-Json -Compress
+            """;
+
+        var json = RunScript(log, script, "读取本机打印机列表", cancellationToken);
+        return JsonHelpers.ParseObjects(json)
+            .Select(o =>
+            {
+                var port = JsonHelpers.String(o, "PortName");
+                return new PrinterDetail(
+                    JsonHelpers.String(o, "Name"),
+                    JsonHelpers.String(o, "ShareName"),
+                    JsonHelpers.String(o, "DriverName"),
+                    port,
+                    JsonHelpers.Bool(o, "Shared") ?? false,
+                    port.StartsWith(@"\\", StringComparison.Ordinal),
+                    JsonHelpers.String(o, "Status"));
+            })
+            .ToList();
+    }
+
     private static IReadOnlyList<PrinterInfo> QueryRemotePrinters(ILogSink log, CancellationToken cancellationToken)
     {
         const string script = """
