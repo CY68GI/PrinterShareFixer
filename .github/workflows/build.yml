@@ -31,19 +31,12 @@ jobs:
       - name: Build
         run: dotnet build PrinterShareFixer.sln -c Release --no-restore
 
-      - name: Publish (framework dependent)
+      - name: Publish (framework dependent, this is what the releases ship)
         run: >
           dotnet publish src/PrinterShareFixer.App/PrinterShareFixer.App.csproj
           -c Release -r win-x64 --self-contained false
           -p:WindowsAppSDKSelfContained=true -p:Platform=x64
           -o artifacts/app-framework-dependent
-
-      - name: Publish (self contained)
-        run: >
-          dotnet publish src/PrinterShareFixer.App/PrinterShareFixer.App.csproj
-          -c Release -r win-x64 --self-contained true
-          -p:WindowsAppSDKSelfContained=true -p:Platform=x64
-          -o artifacts/app-self-contained
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

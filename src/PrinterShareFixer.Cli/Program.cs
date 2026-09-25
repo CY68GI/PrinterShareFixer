@@ -3,6 +3,7 @@ using PrinterShareFixer.Core;
 using PrinterShareFixer.Core.Models;
 using PrinterShareFixer.Core.Profiles;
 using PrinterShareFixer.Core.Runtime;
+using PrinterShareFixer.Core.Update;
 
 namespace PrinterShareFixer.Cli;
 
@@ -27,6 +28,7 @@ internal static class Program
                 "plan" => Plan(args),
                 "run" => await RunAsync(args).ConfigureAwait(false),
                 "version" => Version(args),
+                "update" => await UpdateAsync(args).ConfigureAwait(false),
                 "help" or "-h" or "--help" => Help(),
                 _ => Unknown(command),
             };
@@ -45,6 +47,7 @@ internal static class Program
 
             psfix detect                     检测当前机器的打印机共享相关状态（只读）
             psfix version [--markdown]       显示版本号与各版本更新内容（--markdown 输出 GitHub 用的 Markdown）
+            psfix update [--stage]           检查 GitHub 上的最新版本；--stage 会下载并解压到临时目录（不替换当前程序）
             psfix plan <方案>                打印修复方案包含的步骤与等价命令
             psfix run <方案> [--yes] [--target <电脑名或IP>] [--opt key=value ...]
                                              执行修复（默认只做预演，加 --yes 才真正执行，需要管理员权限）
@@ -72,6 +75,86 @@ internal static class Program
               wpp=true|false                 关闭受保护的打印模式（默认 false，仅 Windows 11）
             """);
         return 0;
+    }
+
+    private static async Task<int> UpdateAsync(string[] args)
+    {
+        var stage = args.Any(arg => arg.Equals("--stage", StringComparison.OrdinalIgnoreCase));
+
+        Console.WriteLine($"{AppInfo.ProductName} 当前版本 v{AppInfo.Version}");
+        Console.WriteLine($"更新源：https://github.com/{UpdateChecker.Repository}/releases");
+        Console.WriteLine("正在检查更新…");
+
+        var result = await UpdateChecker.CheckAsync().ConfigureAwait(false);
+        Console.WriteLine($"  {result.Message}");
+
+        if (result.Release is null)
+        {
+            return result.Status == UpdateCheckStatus.Failed ? 1 : 0;
+        }
+
+        var release = result.Release;
+        Console.WriteLine($"  最新版本：v{release.Version}（{release.TagName}，发布于 {release.Assets.Count} 个文件）");
+        foreach (var asset in release.Assets)
+        {
+            Console.WriteLine($"    · {asset.Name}  {asset.SizeText}{(asset.Sha256 is null ? string.Empty : "  已提供 SHA-256")}");
+        }
+
+        if (result.Status == UpdateCheckStatus.UpToDate)
+        {
+            return 0;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("更新说明：");
+        foreach (var line in release.Notes.Split('\n').Where(l => l.Trim().Length > 0).Take(15))
+        {
+            Console.WriteLine($"  {line.TrimEnd()}");
+        }
+
+        Console.WriteLine();
+        if (!stage)
+        {
+            Console.WriteLine("提示：加 --stage 参数可以下载并解压到临时目录（用于验证更新流程，不会替换当前程序）。");
+            Console.WriteLine("     图形界面里点「设置 → 检查更新 → 立即更新并重启」即可完成自动更新。");
+            return 0;
+        }
+
+        var lastPercent = -1.0;
+        var progress = new Progress<UpdateDownloadProgress>(update =>
+        {
+            if (update.Percent is null)
+            {
+                Console.WriteLine($"  {update.Stage}…");
+                return;
+            }
+
+            if (update.Percent.Value - lastPercent < 10 && update.Percent.Value < 100)
+            {
+                return;
+            }
+
+            lastPercent = update.Percent.Value;
+            Console.WriteLine($"  {update.Stage}… {update.Percent:F0}%（{update.BytesReceived / 1024d / 1024:F1} MB）");
+        });
+
+        try
+        {
+            var staged = await UpdateDownloader
+                .DownloadAndStageAsync(release, UpdateChecker.IsSelfContainedInstall, progress)
+                .ConfigureAwait(false);
+
+            Console.WriteLine();
+            Console.WriteLine($"下载并校验完成：{staged.Asset.Name}");
+            Console.WriteLine($"解压位置：{staged.AppDirectory}");
+            Console.WriteLine("（--stage 只是准备更新，不会替换当前程序；真正替换由界面里的「立即更新」完成）");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"更新包准备失败：{ex.Message}");
+            return 1;
+        }
     }
 
     private static int Version(string[] args)

@@ -47,6 +47,13 @@
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon FontSize="14" Glyph="&#xE713;" />
                         <TextBlock Text="设置" />
+                        <TextBlock
+                            x:Name="SettingsBadge"
+                            Text="●"
+                            FontSize="12"
+                            Visibility="Collapsed"
+                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                            VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
             </Grid>

@@ -9,6 +9,7 @@ using PrinterShareFixer.Core;
 using PrinterShareFixer.Core.Models;
 using PrinterShareFixer.Core.Profiles;
 using PrinterShareFixer.Core.Runtime;
+using PrinterShareFixer.Core.Update;
 using Windows.Graphics;
 
 namespace PrinterShareFixer.App;
@@ -20,6 +21,7 @@ public sealed partial class MainWindow : Window
     private CancellationTokenSource? _cancellation;
     private SystemSnapshot? _snapshot;
     private BitmapImage? _iconImage;
+    private UpdateRelease? _availableRelease;
     private RepairRole _role = RepairRole.Provider;
     private bool _running;
     private string? _lastLogFile;
@@ -79,6 +81,40 @@ public sealed partial class MainWindow : Window
     {
         RootGrid.Loaded -= OnRootGridLoaded;
         await DetectAsync();
+        _ = CheckForUpdatesInBackgroundAsync();
+    }
+
+    /// <summary>启动时静默检查一次更新（每天最多一次），发现新版本就在设置按钮上点个提示点。</summary>
+    private async Task CheckForUpdatesInBackgroundAsync()
+    {
+        try
+        {
+            if (!UpdateChecker.ShouldAutoCheck())
+            {
+                if (UpdateChecker.LastKnownNewerVersion() is not null)
+                {
+                    SettingsBadge.Visibility = Visibility.Visible;
+                }
+
+                return;
+            }
+
+            var result = await UpdateChecker.CheckAsync();
+            if (result.Status == UpdateCheckStatus.UpdateAvailable && result.Release is not null)
+            {
+                _availableRelease = result.Release;
+                SettingsBadge.Visibility = Visibility.Visible;
+                _log.Write($"检查更新：发现新版本 v{result.Release.Version}（当前 v{AppInfo.Version}）");
+            }
+            else
+            {
+                _log.Write($"检查更新：{result.Message}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Write($"检查更新失败：{ex.Message}");
+        }
     }
 
     /// <summary>设置任务栏/窗口图标与界面标题栏图标（图标文件随程序一起发布）。</summary>
@@ -260,6 +296,181 @@ public sealed partial class MainWindow : Window
 
     private async void OnSettingsClick(object sender, RoutedEventArgs e) => await ShowSettingsAsync();
 
+    /// <summary>设置对话框里的"更新"区块：检查更新、一键更新、下载页兜底。</summary>
+    private StackPanel BuildUpdateSection()
+    {
+        var section = new StackPanel { Spacing = 8 };
+
+        section.Children.Add(new TextBlock
+        {
+            Text = "更新",
+            Style = StyleOrDefault("BodyStrongTextBlockStyle"),
+        });
+
+        section.Children.Add(new TextBlock
+        {
+            Text = $"当前版本 v{AppInfo.Version}（{(UpdateChecker.IsSelfContainedInstall ? "自带运行时" : "需要 .NET 运行时")}）",
+            Style = StyleOrDefault("CaptionTextBlockStyle"),
+            Foreground = BrushOrDefault("TextFillColorSecondaryBrush"),
+            TextWrapping = TextWrapping.Wrap,
+        });
+
+        var statusText = new TextBlock
+        {
+            Text = _availableRelease is null
+                ? "点击「检查更新」从 GitHub 获取最新版本。"
+                : $"发现新版本 v{_availableRelease.Version}，可以直接更新（程序会自动重启）。",
+            TextWrapping = TextWrapping.Wrap,
+        };
+        section.Children.Add(statusText);
+
+        var notesText = new TextBlock
+        {
+            Text = _availableRelease is null ? string.Empty : FormatNotes(_availableRelease.Notes),
+            Visibility = _availableRelease is null ? Visibility.Collapsed : Visibility.Visible,
+            Style = StyleOrDefault("CaptionTextBlockStyle"),
+            Foreground = BrushOrDefault("TextFillColorSecondaryBrush"),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        section.Children.Add(notesText);
+
+        var progress = new ProgressBar
+        {
+            Visibility = Visibility.Collapsed,
+            Maximum = 100,
+            Value = 0,
+        };
+        section.Children.Add(progress);
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var checkButton = new Button { Content = "检查更新" };
+        var updateButton = new Button
+        {
+            Content = "立即更新并重启",
+            Visibility = _availableRelease is null ? Visibility.Collapsed : Visibility.Visible,
+            IsEnabled = _availableRelease is not null,
+        };
+        var pageButton = new Button { Content = "打开下载页" };
+        buttons.Children.Add(checkButton);
+        buttons.Children.Add(updateButton);
+        buttons.Children.Add(pageButton);
+        section.Children.Add(buttons);
+
+        checkButton.Click += async (_, _) =>
+        {
+            checkButton.IsEnabled = false;
+            updateButton.IsEnabled = false;
+            statusText.Text = "正在检查更新…";
+
+            var result = await UpdateChecker.CheckAsync();
+            switch (result.Status)
+            {
+                case UpdateCheckStatus.UpdateAvailable when result.Release is not null:
+                    _availableRelease = result.Release;
+                    SettingsBadge.Visibility = Visibility.Visible;
+                    statusText.Text = $"发现新版本 v{result.Release.Version}（当前 v{AppInfo.Version}），点击「立即更新并重启」即可。";
+                    notesText.Text = FormatNotes(result.Release.Notes);
+                    notesText.Visibility = Visibility.Visible;
+                    updateButton.Visibility = Visibility.Visible;
+                    updateButton.IsEnabled = true;
+                    break;
+                case UpdateCheckStatus.UpToDate:
+                    statusText.Text = result.Message;
+                    updateButton.Visibility = Visibility.Collapsed;
+                    SettingsBadge.Visibility = Visibility.Collapsed;
+                    break;
+                default:
+                    statusText.Text = $"{result.Message}（可以点「打开下载页」手动下载）";
+                    break;
+            }
+
+            checkButton.IsEnabled = true;
+        };
+
+        updateButton.Click += async (_, _) => await RunUpdateAsync(updateButton, statusText, progress);
+        pageButton.Click += (_, _) => OpenUrl(_availableRelease?.HtmlUrl ?? UpdateChecker.ReleasesPageUrl);
+
+        return section;
+    }
+
+    private async Task RunUpdateAsync(Button updateButton, TextBlock statusText, ProgressBar progress)
+    {
+        var release = _availableRelease;
+        if (release is null)
+        {
+            return;
+        }
+
+        try
+        {
+            updateButton.IsEnabled = false;
+            progress.Visibility = Visibility.Visible;
+            progress.Value = 0;
+            statusText.Text = "正在下载更新包…";
+
+            var report = new Progress<UpdateDownloadProgress>(update =>
+            {
+                statusText.Text = update.Percent is null
+                    ? $"{update.Stage}…"
+                    : $"{update.Stage}… {update.Percent:F0}%（{update.BytesReceived / 1024d / 1024:F1} MB）";
+
+                if (update.Percent is not null)
+                {
+                    progress.Value = update.Percent.Value;
+                }
+            });
+
+            var staged = await UpdateDownloader.DownloadAndStageAsync(
+                release,
+                UpdateChecker.IsSelfContainedInstall,
+                report);
+
+            _log.Write($"更新包已就绪：{staged.AppDirectory}（来自 {staged.Asset.Name}）");
+            statusText.Text = $"更新包已下载并校验通过，程序即将重启完成更新到 v{staged.Version}…";
+            progress.Value = 100;
+
+            UpdateApplier.StartUpdater(staged.AppDirectory, AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), relaunch: true);
+
+            await Task.Delay(800);
+            Application.Current.Exit();
+        }
+        catch (Exception ex)
+        {
+            _log.Write($"自动更新失败：{ex}");
+            progress.Visibility = Visibility.Collapsed;
+            updateButton.IsEnabled = true;
+            statusText.Text = $"更新失败：{ex.Message}。可以点「打开下载页」手动下载。";
+        }
+    }
+
+    private static string FormatNotes(string notes)
+    {
+        if (string.IsNullOrWhiteSpace(notes))
+        {
+            return string.Empty;
+        }
+
+        var lines = notes
+            .Split('\n')
+            .Select(line => line.TrimEnd())
+            .Where(line => line.Trim().Length > 0)
+            .Take(10);
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch
+        {
+            // 打不开浏览器时忽略
+        }
+    }
+
     private async Task ShowSettingsAsync()
     {
         var panel = new StackPanel { Spacing = 14, MinWidth = 480 };
@@ -290,6 +501,14 @@ public sealed partial class MainWindow : Window
         });
         header.Children.Add(titleStack);
         panel.Children.Add(header);
+
+        panel.Children.Add(new Border
+        {
+            Height = 1,
+            Background = BrushOrDefault("CardStrokeColorDefaultBrush"),
+        });
+
+        panel.Children.Add(BuildUpdateSection());
 
         panel.Children.Add(new Border
         {

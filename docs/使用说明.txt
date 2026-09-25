@@ -60,23 +60,43 @@
 五、日志与还原
    日志：C:\ProgramData\PrinterShareFixer\Logs\printer-share-fix-日期时间.log
          （界面上点“打开日志”可直接打开该目录）
-   备份：C:\ProgramData\PrinterShareFixer\Backups\日期时间\*.reg
+  备份：C:\ProgramData\PrinterShareFixer\Backups\日期时间\*.reg
          修复前程序会自动导出相关注册表项；需要还原时双击对应的
          .reg 文件并确认导入，然后重启电脑。
 
-六、命令行版本（可选，见 psfix-cli 文件夹）
+六、更新程序（不用重新下载整个压缩包）
+   1. 点右上角“设置”；
+   2. 在“更新”一栏点“检查更新”。程序启动时也会每天自动检查一次，
+      有新版本时“设置”按钮上会出现一个小圆点提示；
+   3. 发现新版本后点“立即更新并重启”，程序会自动下载、校验、
+      替换并重新启动，通常 1-3 分钟（取决于网速）。
+
+   几点说明：
+   · 更新包来自项目的 GitHub Releases，下载后会校验 SHA-256，
+     校验不通过就删除并报错，不会替换正在用的程序；
+   · 替换前会把旧版本改名备份（形如 PrinterShareFixer-win-x64.old-日期时间），
+     切换失败会自动还原；
+   · 日志与注册表备份都在 C:\ProgramData\PrinterShareFixer 下，
+     更新只替换程序目录，不会动这些数据；
+   · 如果提示更新失败（网络不通、程序目录只读、权限不足等），
+     点“打开下载页”手动下载覆盖即可，旧版本仍然可用。
+
+七、命令行版本（可选，见 psfix-cli 文件夹）
    适合批量处理或远程排查：
         psfix version                           查看版本号与更新内容
         psfix detect                            只读检测，不改任何设置
+        psfix update                            检查是否有新版本
+        psfix update --stage                    下载并解压更新包到临时目录（不替换程序）
         psfix plan win11-consumer               查看客户端方案包含哪些动作
         psfix run win10-provider                预演（不会真的修改）
         psfix run win11-consumer --yes --target 192.168.1.10
                                                 真正执行（需在管理员命令行里运行）
 
-   注意：如果你下载的是“不自带运行时”的包，运行前需要先安装 .NET 10 桌面运行时，
+   注意：发行版不带 .NET 运行时，运行前需要先安装 .NET 10 运行时（x64），
    安装地址见包内的“运行前必读”说明或 https://dotnet.microsoft.com/download/dotnet/10.0
+   （装 “.NET Desktop Runtime 10.x” 也可以，它包含基础运行时）
 
-七、注意事项
+八、注意事项
    · 程序没有数字签名，SmartScreen 或杀毒软件可能提示“未知发布者”，
      选择“仍要运行”即可；企业环境请先走内部白名单流程。
    · “关闭密码保护的共享”“允许不安全的来宾登录”会降低局域网安全性，

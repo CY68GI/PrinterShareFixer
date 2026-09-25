@@ -1,19 +1,20 @@
 <#
     Builds the ready-to-run packages into the "release" folder.
 
-    Two variants are produced:
+    By default only the framework dependent ("slim") package is produced, because
+    that is what the GitHub releases ship:
 
-      1. self-contained   (best default download)
-         release\PrinterShareFixer-win-x64\                      runnable app
-         release\psfix-cli-win-x64\                              command line tool
-         release\PrinterShareFixer-<version>-win-x64.zip         unzip anywhere and run
+      release\PrinterShareFixer-win-x64-requires-dotnet\      runnable app
+      release\psfix-cli-win-x64-requires-dotnet\              command line tool
+      release\PrinterShareFixer-<version>-win-x64-requires-dotnet.zip
 
-      2. framework dependent  (about half the size, needs the .NET 10 runtime)
-         release\PrinterShareFixer-win-x64-requires-dotnet\
-         release\psfix-cli-win-x64-requires-dotnet\
-         release\PrinterShareFixer-<version>-win-x64-requires-dotnet.zip
+    Add -Variant All (or -Variant SelfContained) when you also want the big
+    self-contained package, which is handy for testing on a PC without .NET:
 
-    Both variants bundle the Windows App SDK, so the only optional dependency
+      release\PrinterShareFixer-win-x64\                      runnable app
+      release\PrinterShareFixer-<version>-win-x64.zip
+
+    Both variants always bundle the Windows App SDK, so the only optional dependency
     is the .NET runtime.
 
     Layout inside every archive:
@@ -24,7 +25,7 @@
 
     Usage:
       powershell -ExecutionPolicy Bypass -File .\package.ps1
-      powershell -ExecutionPolicy Bypass -File .\package.ps1 -Variant FrameworkDependent
+      powershell -ExecutionPolicy Bypass -File .\package.ps1 -Variant All
       powershell -ExecutionPolicy Bypass -File .\package.ps1 -SkipArchive
 
     This file is intentionally ASCII-only: Windows PowerShell 5.1 reads .ps1
@@ -34,7 +35,7 @@ param(
     [string]$Configuration = "Release",
     [string]$RuntimeIdentifier = "win-x64",
     [ValidateSet('All', 'SelfContained', 'FrameworkDependent')]
-    [string]$Variant = 'All',
+    [string]$Variant = 'FrameworkDependent',
     [switch]$SkipArchive
 )
 
@@ -212,9 +213,15 @@ function New-Package {
 New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
 
 # remove stale artifacts from earlier runs (archives and the guide copies that
-# older versions of this script left in the release root)
+# older versions of this script left in the release root, plus the publish
+# folders of a previous variant)
 foreach ($pattern in @('*.zip', '*.txt', '*.bat', '*.url')) {
     Get-ChildItem -LiteralPath $releaseRoot -Filter $pattern -File -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Safely $_.FullName }
+}
+
+foreach ($pattern in @('PrinterShareFixer-*', 'psfix-cli-*')) {
+    Get-ChildItem -LiteralPath $releaseRoot -Filter $pattern -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Remove-Safely $_.FullName }
 }
 
@@ -232,6 +239,12 @@ if ($Variant -eq 'All' -or $Variant -eq 'FrameworkDependent') {
 
 Write-Host ""
 Write-Host "Done. Everything is under: $releaseRoot" -ForegroundColor Green
-Write-Host "Self contained : release\PrinterShareFixer-$version-$RuntimeIdentifier.zip"
-Write-Host "Slim (needs .NET 10) : release\PrinterShareFixer-$version-$RuntimeIdentifier-requires-dotnet.zip"
-Write-Host "Upload both zip files to the GitHub release page."
+if ($Variant -eq 'All' -or $Variant -eq 'SelfContained') {
+    Write-Host "Self contained : release\PrinterShareFixer-$version-$RuntimeIdentifier.zip"
+}
+
+if ($Variant -eq 'All' -or $Variant -eq 'FrameworkDependent') {
+    Write-Host "Slim (needs .NET 10) : release\PrinterShareFixer-$version-$RuntimeIdentifier-requires-dotnet.zip"
+}
+
+Write-Host "Upload the zip file(s) to the GitHub release page (the app updates itself from there)."

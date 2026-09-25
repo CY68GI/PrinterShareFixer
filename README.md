@@ -1,6 +1,6 @@
 # 打印机共享修复工具
 
-[![build](https://github.com/你的用户名/你的仓库名/actions/workflows/build.yml/badge.svg)](https://github.com/你的用户名/你的仓库名/actions/workflows/build.yml)
+[![build](https://github.com/CY68GI/PrinterShareFixer/actions/workflows/build.yml/badge.svg)](https://github.com/CY68GI/PrinterShareFixer/actions/workflows/build.yml)
 ![platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![.NET](https://img.shields.io/badge/.NET-10-512BD4)
@@ -25,6 +25,7 @@ connects to it).
   受保护的打印模式（WPP）。
 - **可观测**：修复前检测、逐项进度、每步耗时、完整日志；修改前自动备份注册表，可回滚。
 - **客户端连通性诊断**：填入对方电脑名或 IP，自动测试名称解析、ping、TCP 445/135、共享列表。
+- **应用内自动更新**：设置里「检查更新」→「立即更新并重启」，自动从 GitHub Releases 下载、校验、替换并重启，不用重新下载整个包。
 - **命令行工具 `psfix`**：`detect` / `plan` / `run` / `version`，适合批量部署与远程排查。
 - 界面使用 WinUI 3（Windows App SDK 2.4 + .NET 10），自带应用图标，支持深浅色主题。
 
@@ -34,23 +35,43 @@ connects to it).
 
 | 压缩包 | 体积 | 说明 |
 | --- | --- | --- |
-| `PrinterShareFixer-<版本>-win-x64.zip` | 约 127 MB | **自带 .NET 运行时**，解压即用，推荐普通用户 |
-| `PrinterShareFixer-<版本>-win-x64-requires-dotnet.zip` | 约 59 MB | **不自带运行时**，需要先安装 [.NET 10 运行时](https://dotnet.microsoft.com/download/dotnet/10.0)（x64）。包内附「运行前必读」和 `启动程序.bat`：没装运行时会提示并自动打开下载页 |
+| `PrinterShareFixer-<版本>-win-x64-requires-dotnet.zip` | 约 59 MB | 解压即用；**首次使用需要安装 [.NET 10 运行时](https://dotnet.microsoft.com/download/dotnet/10.0)（x64）**，包内附「运行前必读」与 `启动程序.bat`：没装运行时会用中文提示并自动打开下载页 |
 
-两个包都会随程序带上 Windows App SDK，所以额外依赖只有 .NET 运行时这一项。
+发行版刻意**只提供不带运行时和其他依赖的精简包**（体积约为完整包的一半以下），
+Windows App SDK 已随程序打包，所以唯一的额外依赖就是 .NET 运行时。
 系统要求：Windows 10 1809 及以上 / Windows 11，64 位（x64）。
 
 ## 使用方法
 
 1. 解压压缩包（**整个文件夹一起**，不要只拷 exe）。
-2. 双击 `PrinterShareFixer.exe`，在"用户账户控制"里选"是"（修改服务和防火墙需要管理员权限）。
-3. 界面第一步选这台电脑的角色，第二步选这台电脑的系统（会自动标出推荐项），点按钮开始修复。
+2. 推荐双击包内的 **`启动程序.bat`**：它会先检查 .NET 10 运行时，装了就直接启动程序，没装就用中文提示并打开下载页。
+   直接双击 `PrinterShareFixer.exe` 也可以，运行时缺失时 Windows 会弹出「必须安装 .NET」的提示框。
+3. 在"用户账户控制"里选"是"（修改服务和防火墙需要管理员权限）。
+4. 界面第一步选这台电脑的角色，第二步选这台电脑的系统（会自动标出推荐项），点按钮开始修复。
 
 > 用打印机的那台电脑连不上时，一般两台电脑各跑一次最稳妥：
 > 接打印机的那台选"本机接有打印机"，要用打印机的那台选"本机没有打印机"。
 
 更详细的图文步骤、排查清单和常见问题见 [docs/使用说明.txt](docs/使用说明.txt)。
 右上角 **设置** 里可以看到当前版本号与每个版本的更新内容。
+
+## 自动更新
+
+免安装的应用没有安装程序帮忙升级，所以更新是自己做的：
+
+1. 打开 **设置 → 更新 → 检查更新**（程序启动时也会每天静默检查一次，有新版本会在「设置」按钮上显示提示点）。
+2. 有新版本时对话框会列出该版本的更新内容，点 **「立即更新并重启」**。
+3. 程序自动完成：下载更新包 → 用 Release 里的 **SHA-256 校验** → 解压到临时目录 → 启动更新程序 → 等待主程序退出 → 复制新版本、把旧版本改名备份 → 切换到新版本 → 重新启动。
+
+细节与安全设计：
+
+- 更新包来自本仓库的 GitHub Releases，按当前安装形态自动选择对应的 zip；
+- 校验失败会删除下载的文件并报错，**不会替换**正在使用的程序；
+- 切换失败会自动还原成旧版本，整个过程记录在 `%ProgramData%\PrinterShareFixer\Logs\update-*.log`；
+- 只替换程序目录，日志与注册表备份都在 `%ProgramData%` 下，**用户数据不受影响**；
+- 老版本目录会保留为 `<目录名>.old-<时间戳>` 作为回滚点，下次更新时自动清理更早的备份；
+- 网络受限的环境可以设置镜像：环境变量 `PSF_UPDATE_MIRROR`（例如 `https://ghproxy.net/`），或直接点「打开下载页」手动下载；
+- 程序目录不可写（只读介质、网络共享）时会失败并提示手动更新，不会破坏现有安装。
 
 ## 修复方案一览
 
