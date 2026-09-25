@@ -2,26 +2,44 @@ using PrinterShareFixer.Core.Models;
 
 namespace PrinterShareFixer.Core.Profiles;
 
-/// <summary>内置的两个修复方案。</summary>
+/// <summary>内置的四套修复方案：本机角色（有打印机 / 没有打印机）× 本机系统（Win10 / Win11）。</summary>
 public static class RepairProfiles
 {
-    private static readonly Lazy<RepairProfile> Windows10Lazy = new(Windows10Profile.Create);
+    private static readonly Lazy<IReadOnlyList<RepairProfile>> AllLazy = new(() =>
+    [
+        RepairProfileFactory.Create(RepairRole.Provider, "win10"),
+        RepairProfileFactory.Create(RepairRole.Provider, "win11"),
+        RepairProfileFactory.Create(RepairRole.Consumer, "win10"),
+        RepairProfileFactory.Create(RepairRole.Consumer, "win11"),
+    ]);
 
-    private static readonly Lazy<RepairProfile> Windows11Lazy = new(Windows11Profile.Create);
+    public static IReadOnlyList<RepairProfile> All => AllLazy.Value;
 
-    public static RepairProfile Windows10 => Windows10Lazy.Value;
+    public static RepairProfile Windows10 => Get(RepairRole.Provider, "win10");
 
-    public static RepairProfile Windows11 => Windows11Lazy.Value;
+    public static RepairProfile Windows11 => Get(RepairRole.Provider, "win11");
 
-    public static IReadOnlyList<RepairProfile> All => [Windows10, Windows11];
+    public static RepairProfile Get(RepairRole role, string osKey) =>
+        All.First(p => p.Role == role && p.OsKey.Equals(NormalizeOs(osKey), StringComparison.OrdinalIgnoreCase));
 
-    public static RepairProfile Get(string key) => key.ToLowerInvariant() switch
+    public static IReadOnlyList<RepairProfile> ForRole(RepairRole role) => All.Where(p => p.Role == role).ToList();
+
+    /// <summary>支持 "win10-provider"、"win10-consumer"，也兼容旧的 "win10"（按服务端处理）。</summary>
+    public static RepairProfile Get(string key)
     {
-        "win10" or "windows10" or "10" => Windows10,
-        "win11" or "windows11" or "11" => Windows11,
-        _ => throw new ArgumentOutOfRangeException(nameof(key), key, "未知的修复方案，请使用 win10 或 win11。"),
-    };
+        var normalized = key.Trim().ToLowerInvariant();
+        var role = normalized.Contains("consumer") || normalized.Contains("client")
+            ? RepairRole.Consumer
+            : RepairRole.Provider;
+        return Get(role, normalized);
+    }
 
-    /// <summary>根据系统内部版本号推荐方案。</summary>
-    public static RepairProfile Recommend(int buildNumber) => buildNumber >= 22000 ? Windows11 : Windows10;
+    /// <summary>根据本机系统内部版本号推荐系统键。</summary>
+    public static string RecommendOsKey(int buildNumber) => buildNumber >= 22000 ? "win11" : "win10";
+
+    private static string NormalizeOs(string key)
+    {
+        var normalized = key.Trim().ToLowerInvariant();
+        return normalized.Contains("11") ? "win11" : "win10";
+    }
 }

@@ -34,4 +34,23 @@ public static class ServiceCatalog
     [
         new("Browser", "Computer Browser（遗留网络浏览）", "Automatic"),
     ];
+
+    /// <summary>本机没有打印机（客户端）时需要的服务：只保留连接共享所需的部分。</summary>
+    public static readonly ServiceSpec[] ClientRequired =
+    [
+        new("LanmanWorkstation", "Workstation（访问共享）", "Automatic"),
+        new("Spooler", "Print Spooler（打印后台处理程序）", "Automatic"),
+        new("RpcSs", "Remote Procedure Call (RPC)", "Automatic", Configurable: false),
+        new("RpcEptMapper", "RPC Endpoint Mapper", "Automatic", Configurable: false),
+        new("DcomLaunch", "DCOM Server Process Launcher", "Automatic", Configurable: false),
+        new("RpcLocator", "Remote Procedure Call (RPC) Locator", "Manual"),
+        new("Dnscache", "DNS Client", "Automatic"),
+        new("fdPHost", "Function Discovery Provider Host", "Manual"),
+        new("FDResPub", "Function Discovery Resource Publication", "Automatic"),
+        new("SSDPSRV", "SSDP Discovery", "Manual"),
+        new("NlaSvc", "Network Location Awareness", "Automatic"),
+        new("netprofm", "Network List Service", "Manual"),
+        new("Netman", "Network Connections", "Manual"),
+        new("mpssvc", "Windows Defender Firewall", "Automatic"),
+    ];
 }

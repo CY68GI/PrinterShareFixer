@@ -42,6 +42,9 @@ public sealed class SystemSnapshot
 
     public IReadOnlyList<PrinterInfo> SharedPrinters { get; init; } = [];
 
+    /// <summary>本机已连接的远程（共享）打印机。</summary>
+    public IReadOnlyList<PrinterInfo> RemotePrinters { get; init; } = [];
+
     public IReadOnlyList<ShareInfo> Shares { get; init; } = [];
 
     public IReadOnlyList<NetbiosInfo> Netbios { get; init; } = [];
@@ -104,6 +107,7 @@ public sealed class SystemSnapshot
             Services = services,
             Networks = QueryNetworks(log),
             SharedPrinters = QueryPrinters(log),
+            RemotePrinters = QueryRemotePrinters(log),
             Shares = QueryShares(log),
             Netbios = QueryNetbios(log),
             CustomFirewallRules = firewall.CustomRules,
@@ -126,6 +130,44 @@ public sealed class SystemSnapshot
             ServerRequireSecuritySignatureReg = registry.GetDword(RegistryTools.LanmanServer, "RequireSecuritySignature"),
             WorkstationRequireSecuritySignatureReg = registry.GetDword(RegistryTools.LanmanWorkstation, "RequireSecuritySignature"),
         };
+    }
+
+    /// <summary>按角色生成检测项：服务端关注“我共享了什么”，客户端关注“我连上了谁”。</summary>
+    public IReadOnlyList<DetectionItem> ToDetectionItems(RepairRole role)
+    {
+        var items = ToDetectionItems().ToList();
+        if (role != RepairRole.Consumer)
+        {
+            return items;
+        }
+
+        items.RemoveAll(item =>
+            item.Title is "已共享的打印机" or "已共享的文件夹" or "网络路径提示");
+
+        var unc = new string('\\', 2);
+        items.Add(new DetectionItem(
+            "连接",
+            "已连接的共享打印机",
+            RemotePrinters.Count > 0 ? DetectionStatus.Ok : DetectionStatus.Warning,
+            RemotePrinters.Count > 0
+                ? string.Join("；", RemotePrinters.Select(p => $"{p.Name} ← {p.ShareName}（驱动：{p.DriverName}）"))
+                : $"本机还没有连接任何共享打印机。可在资源管理器地址栏输入 {unc}<对方电脑名或IP> 找到打印机后连接。"));
+
+        items.Add(new DetectionItem(
+            "连接",
+            "本机共享状态",
+            DetectionStatus.Unknown,
+            SharedPrinters.Count > 0
+                ? $"提示：本机也共享了 {SharedPrinters.Count} 台打印机；如果这台电脑不是提供打印机的那台，可以忽略这一行。"
+                : "本机没有共享任何打印机，符合“本机没有打印机”的角色。"));
+
+        items.Add(new DetectionItem(
+            "访问方式",
+            "连接提示",
+            DetectionStatus.Unknown,
+            $"在资源管理器地址栏输入 {unc}<接打印机那台电脑的名称或IP> 即可看到共享打印机；提示输入账号时，用户名写成“对方电脑名{new string('\\', 1)}对方账号”。"));
+
+        return items;
     }
 
     public IReadOnlyList<DetectionItem> ToDetectionItems()
@@ -507,6 +549,25 @@ public sealed class SystemSnapshot
             """;
 
         var json = RunScript(log, script, "读取已共享打印机");
+        return JsonHelpers.ParseObjects(json)
+            .Select(o => new PrinterInfo(
+                JsonHelpers.String(o, "Name"),
+                JsonHelpers.String(o, "ShareName"),
+                JsonHelpers.String(o, "DriverName")))
+            .ToList();
+    }
+
+    /// <summary>本机通过网络连接的共享打印机（端口以 \\\\ 开头的那些）。</summary>
+    private static IReadOnlyList<PrinterInfo> QueryRemotePrinters(ILogSink log)
+    {
+        const string script = """
+            Get-Printer -ErrorAction SilentlyContinue |
+                Where-Object { $_.PortName -like '\\*' } |
+                Select-Object Name,@{n='ShareName';e={ $_.PortName }},DriverName |
+                ConvertTo-Json -Compress
+            """;
+
+        var json = RunScript(log, script, "读取已连接的共享打印机");
         return JsonHelpers.ParseObjects(json)
             .Select(o => new PrinterInfo(
                 JsonHelpers.String(o, "Name"),

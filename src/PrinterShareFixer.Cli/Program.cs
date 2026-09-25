@@ -26,6 +26,7 @@ internal static class Program
                 "detect" => Detect(args),
                 "plan" => Plan(args),
                 "run" => await RunAsync(args).ConfigureAwait(false),
+                "version" => Version(),
                 "help" or "-h" or "--help" => Help(),
                 _ => Unknown(command),
             };
@@ -43,9 +44,21 @@ internal static class Program
             打印机共享修复工具 - 命令行版
 
             psfix detect                     检测当前机器的打印机共享相关状态（只读）
-            psfix plan win10 | win11         打印修复方案包含的步骤与等价命令
-            psfix run win10 | win11 [--yes] [--only id,id] [--opt key=value ...]
+            psfix version                    显示版本号与各版本更新内容
+            psfix plan <方案>                打印修复方案包含的步骤与等价命令
+            psfix run <方案> [--yes] [--target <电脑名或IP>] [--opt key=value ...]
                                              执行修复（默认只做预演，加 --yes 才真正执行，需要管理员权限）
+
+            方案（本机角色 × 本机系统）：
+              win10-provider                   本机接有打印机，为 Windows 10 电脑开放共享
+              win11-provider                   本机接有打印机，为 Windows 11 电脑开放共享
+              win10-consumer                   本机没有打印机，连接 Windows 10 电脑上的共享打印机
+              win11-consumer                   本机没有打印机，连接 Windows 11 电脑上的共享打印机
+              （只写 win10 / win11 时按服务端处理，兼容旧用法）
+
+            其它参数：
+              --role provider|consumer         detect 时按角色生成检测项
+              --target <电脑名或IP>            客户端模式下要连接的电脑，用于连通性测试
 
             高级选项（--opt）：
               backup=true|false              修复前备份注册表（默认 true）
@@ -54,9 +67,28 @@ internal static class Program
               signing=true|false             取消 SMB 签名强制（默认 true）
               rpc-dynamic=true|false         放行 RPC 动态端口（默认 true）
               restart=true|false             修复后重启服务（默认 true）
+              clean-cache=true|false         清理失效打印缓存与卡住的队列（默认 true，客户端）
               smb1=true|false                启用 SMB1（默认 false，仅 Windows 10）
               wpp=true|false                 关闭受保护的打印模式（默认 false，仅 Windows 11）
             """);
+        return 0;
+    }
+
+    private static int Version()
+    {
+        Console.WriteLine($"{AppInfo.ProductName}  v{AppInfo.Version}");
+        Console.WriteLine();
+        foreach (var note in AppInfo.ReleaseNotes)
+        {
+            Console.WriteLine($"v{note.Version}（{note.Date}）");
+            foreach (var line in note.Highlights)
+            {
+                Console.WriteLine($"  · {line}");
+            }
+
+            Console.WriteLine();
+        }
+
         return 0;
     }
 
@@ -75,13 +107,15 @@ internal static class Program
         var verbose = args.Contains("--verbose", StringComparer.OrdinalIgnoreCase);
         using var log = new FileLogSink(mirror: verbose ? line => Console.WriteLine(line) : null);
         var snapshot = SystemSnapshot.Load(log);
+        var role = RepairRoleExtensions.ParseRole(GetOption(args, "--role"));
 
         Console.WriteLine($"系统：{snapshot.OsSummary}");
         Console.WriteLine($"管理员：{(snapshot.IsElevated ? "是" : "否")}");
-        Console.WriteLine($"推荐方案：{RepairProfiles.Recommend(snapshot.Build).DisplayName}");
+        Console.WriteLine($"角色：{role.ToDisplayName()}（{role.ToActionText()}）");
+        Console.WriteLine($"推荐方案：{RepairProfiles.Get(role, RepairProfiles.RecommendOsKey(snapshot.Build)).Key}");
         Console.WriteLine();
 
-        foreach (var group in snapshot.ToDetectionItems().GroupBy(i => i.Category))
+        foreach (var group in snapshot.ToDetectionItems(role).GroupBy(i => i.Category))
         {
             Console.WriteLine($"[{group.Key}]");
             foreach (var item in group)
@@ -235,9 +269,26 @@ internal static class Program
                 case "anyremote":
                     options.AllowAnyRemoteAddress = value;
                     break;
+                case "clean-cache":
+                    options.ClearStalePrintCache = value;
+                    break;
             }
         }
 
+        options.TargetHost = GetOption(args, "--target");
         return options;
+    }
+
+    private static string? GetOption(string[] args, string name)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i].Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                return args[i + 1];
+            }
+        }
+
+        return null;
     }
 }

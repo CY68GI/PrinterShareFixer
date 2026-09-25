@@ -75,18 +75,20 @@ internal static class CommonSteps
     public static RepairStep Services(IReadOnlyList<ServiceSpec> specs, string title)
     {
         var serviceList = string.Join("、", specs.Select(s => s.Name));
+        var commandPreview = specs
+            .Where(s => s.Configurable)
+            .Take(3)
+            .Select(s => $"Set-Service -Name {s.Name} -StartupType {s.StartMode}")
+            .ToList();
+        commandPreview.Add(
+            $"Start-Service -Name {string.Join(", ", specs.Where(s => s.StartMode == "Automatic").Take(4).Select(s => s.Name))}");
+
         return new RepairStep
         {
             Id = "services.core",
             Title = title,
             Description = $"确保以下服务已启动并按需要自动启动：{serviceList}。",
-            Commands =
-            [
-                "Set-Service -Name LanmanServer -StartupType Automatic",
-                "Set-Service -Name Spooler -StartupType Automatic",
-                "Set-Service -Name FDResPub -StartupType Automatic",
-                "Start-Service -Name LanmanServer, Spooler, FDResPub",
-            ],
+            Commands = commandPreview,
             Handler = async (context, ct) =>
             {
                 var script = BuildServiceScript(specs);
@@ -556,7 +558,7 @@ internal static class CommonSteps
         };
     }
 
-    public static RepairStep Verify()
+    public static RepairStep Verify(RepairRole role)
     {
         return new RepairStep
         {
@@ -567,7 +569,7 @@ internal static class CommonSteps
             Handler = (context, _) =>
             {
                 var snapshot = SystemSnapshot.Load(context.Log);
-                var items = snapshot.ToDetectionItems();
+                var items = snapshot.ToDetectionItems(role);
                 var problems = items.Where(i => i.Status == DetectionStatus.Problem).ToList();
                 var warnings = items.Where(i => i.Status == DetectionStatus.Warning).ToList();
                 var details = items
@@ -577,11 +579,14 @@ internal static class CommonSteps
 
                 if (problems.Count == 0)
                 {
+                    var finishHint = role == RepairRole.Consumer
+                        ? "请回到资源管理器，重新打开\\\\<对方电脑> 并连接共享打印机测试。"
+                        : "请到客户端电脑上重新连接本机共享打印机测试。";
                     return Task.FromResult(StepResult.Ok(
                         warnings.Count == 0
-                            ? "复核完成：所有检查项均通过。"
-                            : $"复核完成：{warnings.Count} 项建议关注，没有阻塞性问题。",
-                        [.. details]));
+                            ? $"复核完成：所有检查项均通过。{finishHint}"
+                            : $"复核完成：{warnings.Count} 项建议关注，没有阻塞性问题。{finishHint}",
+                        [.. details, finishHint]));
                 }
 
                 return Task.FromResult(StepResult.Warn(

@@ -30,6 +30,12 @@ public sealed class RepairOptions
     /// <summary>关闭 Windows 受保护的打印模式（仅 Windows 11 24H2+）。</summary>
     public bool DisableProtectedPrintMode { get; set; }
 
+    /// <summary>客户端模式：需要连接的打印机所在电脑名称或 IP（可留空）。</summary>
+    public string? TargetHost { get; set; }
+
+    /// <summary>客户端模式：清理失效的打印缓存与卡住的打印队列。</summary>
+    public bool ClearStalePrintCache { get; set; } = true;
+
     /// <summary>根据选项键判断某个步骤是否应该执行。</summary>
     public bool IsStepEnabled(string? optionKey) => optionKey switch
     {
@@ -42,6 +48,7 @@ public sealed class RepairOptions
         "restart-services" => RestartServicesAfterFix,
         "backup" => BackupRegistry,
         "wpp" => DisableProtectedPrintMode,
+        "clean-cache" => ClearStalePrintCache,
         _ => true,
     };
 }
