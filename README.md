@@ -100,10 +100,11 @@ Printer_Sharing_Troubleshooter/
 │  ├─ PrinterShareFixer.Core/    修复逻辑与检测逻辑（界面与命令行共用）
 │  └─ PrinterShareFixer.Cli/     命令行工具 psfix
 ├─ assets/icon/                  图标母版与生成脚本（make_icon.py）
+├─ tools/check-scripts.ps1       开发用：检查所有内嵌 PowerShell 脚本的语法
 ├─ release/                      编译打包好的可直接运行程序（分发用）
 │  ├─ PrinterShareFixer-win-x64/        双击 PrinterShareFixer.exe 即可运行
 │  ├─ psfix-cli-win-x64/                 可选命令行工具
-│  ├─ PrinterShareFixer-1.1.1-win-x64.zip  一个压缩包包含全部内容，拷到其他电脑解压即用
+│  ├─ PrinterShareFixer-1.1.2-win-x64.zip  一个压缩包包含全部内容，拷到其他电脑解压即用
 │  └─ 使用说明.txt                       给最终用户的使用说明
 ├─ build/                        编译中间产物（可随时删除，不属于源码）
 ├─ build.ps1                     编译到 build/
@@ -128,6 +129,9 @@ powershell -ExecutionPolicy Bypass -File .\package.ps1
 
 # 界面预览版（不申请管理员权限，仅用于调界面，不能执行修复）
 powershell -ExecutionPolicy Bypass -File .\preview-ui.ps1
+
+# 提交前自检所有内嵌 PowerShell 脚本的语法（防止智能引号 / 括号之类的低级错误）
+powershell -ExecutionPolicy Bypass -File .\tools\check-scripts.ps1
 ```
 
 也可以在 Visual Studio 中打开 `PrinterShareFixer.sln`（解决方案平台选择 **x64**）。

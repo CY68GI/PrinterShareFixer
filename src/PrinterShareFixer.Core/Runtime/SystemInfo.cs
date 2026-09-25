@@ -12,7 +12,26 @@ public sealed record SystemInfo(string ProductName, string DisplayVersion, int B
 
     public bool IsWindows11_24H2OrLater => Build >= 26100;
 
-    public string OsSummary => $"{ProductName} {DisplayVersion}（内部版本 {Build}.{Ubr}）".Trim();
+    public string WindowsName => IsWindows11 ? "Windows 11" : "Windows 10";
+
+    /// <summary>
+    /// 注册表里的 ProductName 即使在 Windows 11 上也常常仍写着 “Windows 10 Pro”，
+    /// 所以这里按内部版本号纠正系统名，只保留版本后缀（Pro / Home / Enterprise…）。
+    /// </summary>
+    private string EditionSuffix => (ProductName ?? string.Empty)
+        .Replace("Windows 11", string.Empty)
+        .Replace("Windows 10", string.Empty)
+        .Trim();
+
+    public string OsSummary
+    {
+        get
+        {
+            var parts = new[] { WindowsName, EditionSuffix, DisplayVersion }
+                .Where(part => !string.IsNullOrWhiteSpace(part));
+            return $"{string.Join(' ', parts)}（内部版本 {Build}.{Ubr}）";
+        }
+    }
 
     public static SystemInfo Read()
     {

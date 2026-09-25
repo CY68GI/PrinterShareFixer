@@ -154,13 +154,26 @@ internal static class CommonSteps
                             $out.Add("OK|$($nic.Description)|已启用")
                             continue
                         }
+                        $done = $false
                         try {
-                            $rc = $nic.SetTcpipNetbios(1)
-                            if ($rc.ReturnValue -eq 0) {
-                                $out.Add("FIXED|$($nic.Description)|已启用 NetBIOS over TCP/IP")
-                            } else {
-                                $out.Add("ERR|$($nic.Description)|返回代码 $($rc.ReturnValue)")
-                            }
+                            $rc = Invoke-CimMethod -InputObject $nic -MethodName SetTcpipNetbios -Arguments @{ TcpipNetbiosOptions = [uint32]1 } -ErrorAction Stop
+                            if ($rc.ReturnValue -eq 0) { $done = $true }
+                        } catch { }
+                        if ($done) {
+                            $out.Add("FIXED|$($nic.Description)|已启用 NetBIOS over TCP/IP")
+                            continue
+                        }
+                        # WMI 方法不可用时，直接写 NetBT 的网卡注册表项
+                        $guid = [string]$nic.SettingID
+                        if (-not $guid) {
+                            $out.Add("ERR|$($nic.Description)|无法通过 WMI 设置，也拿不到网卡 GUID")
+                            continue
+                        }
+                        $key = "HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters\Interfaces\Tcpip_$guid"
+                        try {
+                            if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key -Force -ErrorAction Stop | Out-Null }
+                            New-ItemProperty -Path $key -Name NetbiosOptions -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+                            $out.Add("FIXED|$($nic.Description)|已写入注册表 NetbiosOptions=1（重启后完全生效）")
                         } catch {
                             $out.Add("ERR|$($nic.Description)|$($_.Exception.Message)")
                         }
@@ -187,15 +200,16 @@ internal static class CommonSteps
             [
                 "Set-NetFirewallRule -Group '@FirewallAPI.dll,-32752' -Enabled True",
                 "Set-NetFirewallRule -Group '@FirewallAPI.dll,-32753' -Enabled True",
-                "New-NetFirewallRule -DisplayName PSF-SMB-In-TCP -Protocol TCP -LocalPort 445",
-                "New-NetFirewallRule -DisplayName PSF-RPC-In-TCP -Protocol TCP -LocalPort 135",
-                "New-NetFirewallRule -DisplayName PSF-WSDAPI-In-TCP -Protocol TCP -LocalPort 5357",
+                "New-NetFirewallRule -DisplayName PSF-SMB-In-TCP -Protocol TCP -LocalPort @('445')",
+                "New-NetFirewallRule -DisplayName PSF-NetBIOS-In-TCP -Protocol TCP -LocalPort @('137','139')",
+                "New-NetFirewallRule -DisplayName PSF-RPC-In-TCP -Protocol TCP -LocalPort @('135')",
             ],
             Handler = async (context, ct) =>
             {
                 var script = BuildFirewallScript(allowAnyRemoteAddress, allowRpcDynamicPorts);
                 var result = await context.PowerShell.RunAsync(script, ct, "配置防火墙放行规则");
-                string[] critical = ["文件和打印机共享", "网络发现", "PSF-SMB-In-TCP"];
+                // 网络发现在部分系统上组名不同，缺了不影响 SMB/RPC 放行，因此只算提醒
+                string[] critical = ["文件和打印机共享", "PSF-SMB-In-TCP"];
                 return StatusScript.Summarize("防火墙规则配置完成", StatusScript.Parse(result), critical);
             },
         };
@@ -649,57 +663,46 @@ internal static class CommonSteps
         builder.AppendLine("$out = New-Object System.Collections.Generic.List[string]");
         builder.AppendLine($"$remote = '{remote}'");
         builder.AppendLine("""
-            # 内置规则组的 Group 属性可能是资源字符串，也可能是本地化名称，两种都尝试匹配。
-            function Get-FirewallGroupRules {
-                param([string]$IndirectId, [string[]]$Patterns)
+            # 内置规则组的 Group 既可能是资源字符串，也可能是本地化名称，两种都尝试匹配。
+            function Enable-FirewallGroup {
+                param([string]$Label, [string]$IndirectId, [string[]]$Patterns, [string]$NamePrefix)
                 $rules = @(Get-NetFirewallRule -Group $IndirectId -ErrorAction SilentlyContinue)
-                if ($rules.Count -gt 0) { return $rules }
-                return @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object {
-                    $group = [string]$_.Group
-                    if (-not $group) { return $false }
-                    if ($group -eq $IndirectId) { return $true }
-                    foreach ($pattern in $Patterns) { if ($group -like $pattern) { return $true } }
-                    return $false
-                })
-            }
-            $canQuery = $true
-            try {
-                $null = Get-NetFirewallRule -ErrorAction Stop
-            } catch {
-                $canQuery = $false
-                $out.Add("ERR|防火墙规则查询|$($_.Exception.Message)")
-            }
-            if ($canQuery) {
-                $groupTargets = [ordered]@{
-                    '文件和打印机共享' = @{ Id = '@FirewallAPI.dll,-32752'; Patterns = @('*File and Printer Sharing*','*文件和打印机共享*') }
-                    '网络发现'         = @{ Id = '@FirewallAPI.dll,-32753'; Patterns = @('*Network Discovery*','*网络发现*') }
+                if ($rules.Count -eq 0) {
+                    # 组名的资源 ID 对不上时，先按显示组名和规则名前缀找，最后才全量枚举
+                    $rules = @(Get-NetFirewallRule -DisplayGroup $Patterns -ErrorAction SilentlyContinue)
                 }
-                foreach ($key in $groupTargets.Keys) {
-                    $target = $groupTargets[$key]
-                    $rules = @(Get-FirewallGroupRules -IndirectId $target.Id -Patterns $target.Patterns)
-                    if ($rules.Count -eq 0) {
-                        $out.Add("MISSING|$key|系统中未找到该内置规则组")
-                        continue
-                    }
-                    $disabled = @($rules | Where-Object { $_.Enabled -ne 'True' })
-                    if ($disabled.Count -eq 0) {
-                        $out.Add("OK|$key|$($rules.Count) 条规则均已启用")
-                        continue
-                    }
-                    $fixed = 0
-                    foreach ($rule in $disabled) {
-                        try {
-                            Set-NetFirewallRule -Name $rule.Name -Enabled True -ErrorAction Stop
-                            $fixed++
-                        } catch {
-                            $out.Add("ERR|$key|$($rule.DisplayName)：$($_.Exception.Message)")
+                if ($rules.Count -eq 0 -and $NamePrefix) {
+                    $rules = @(Get-NetFirewallRule -Name $NamePrefix -ErrorAction SilentlyContinue)
+                }
+                if ($rules.Count -eq 0) {
+                    $rules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object {
+                        $group = [string]$_.Group
+                        if ($group) {
+                            if ($group -eq $IndirectId) { return $true }
+                            foreach ($pattern in $Patterns) { if ($group -like $pattern) { return $true } }
                         }
-                    }
-                    if ($fixed -gt 0) { $out.Add("FIXED|$key|已启用 $fixed 条规则") }
+                        if ($NamePrefix -and $_.Name -like $NamePrefix) { return $true }
+                        return $false
+                    })
+                }
+                if ($rules.Count -eq 0) {
+                    $out.Add("WARN|$Label|系统里没找到该内置规则组，所需端口已由下面的自定义规则覆盖")
+                    return
+                }
+                $disabled = @($rules | Where-Object { $_.Enabled -ne 'True' })
+                if ($disabled.Count -eq 0) {
+                    $out.Add("OK|$Label|$($rules.Count) 条规则均已启用")
+                    return
+                }
+                try {
+                    $disabled | Set-NetFirewallRule -Enabled True -ErrorAction Stop
+                    $out.Add("FIXED|$Label|已启用 $($disabled.Count) 条规则（共 $($rules.Count) 条）")
+                } catch {
+                    $out.Add("ERR|$Label|$($_.Exception.Message)")
                 }
             }
             function Add-PsfRule {
-                param([string]$RuleName, [string]$Protocol, [string]$Ports)
+                param([string]$RuleName, [string]$Protocol, [string[]]$Ports)
                 $existing = @(Get-NetFirewallRule -DisplayName $RuleName -ErrorAction SilentlyContinue)
                 if ($existing.Count -gt 0) {
                     foreach ($rule in $existing) {
@@ -714,24 +717,30 @@ internal static class CommonSteps
                 }
                 try {
                     New-NetFirewallRule -DisplayName $RuleName -Group 'PrinterShareFixer' -Description '打印机共享修复工具创建的放行规则' -Direction Inbound -Action Allow -Protocol $Protocol -LocalPort $Ports -Profile Domain,Private -RemoteAddress $remote -ErrorAction Stop | Out-Null
-                    $out.Add("CREATED|$RuleName|$Protocol $Ports（远程范围：$remote）")
+                    $out.Add("CREATED|$RuleName|$Protocol $($Ports -join ',')（远程范围：$remote）")
                 } catch {
                     $out.Add("ERR|$RuleName|$($_.Exception.Message)")
                 }
             }
             """);
 
-        builder.AppendLine("Add-PsfRule -RuleName 'PSF-SMB-In-TCP' -Protocol TCP -Ports '445'");
-        builder.AppendLine("Add-PsfRule -RuleName 'PSF-NetBIOS-In-TCP' -Protocol TCP -Ports '137,139'");
-        builder.AppendLine("Add-PsfRule -RuleName 'PSF-NetBIOS-In-UDP' -Protocol UDP -Ports '137,138'");
-        builder.AppendLine("Add-PsfRule -RuleName 'PSF-RPC-In-TCP' -Protocol TCP -Ports '135'");
+        builder.AppendLine("$canQuery = $true");
+        builder.AppendLine(@"try { $null = Get-NetFirewallProfile -ErrorAction Stop } catch { $canQuery = $false; $out.Add(""ERR|防火墙查询|$($_.Exception.Message)"") }");
+        builder.AppendLine("if ($canQuery) {");
+        builder.AppendLine("    Enable-FirewallGroup -Label '文件和打印机共享' -IndirectId '@FirewallAPI.dll,-32752' -Patterns @('*File and Printer Sharing*','*文件和打印机共享*') -NamePrefix ''");
+        builder.AppendLine("    Enable-FirewallGroup -Label '网络发现' -IndirectId '@FirewallAPI.dll,-32753' -Patterns @('*Network Discovery*','*网络发现*') -NamePrefix 'NETDIS*'");
+        builder.AppendLine("    Add-PsfRule -RuleName 'PSF-SMB-In-TCP' -Protocol TCP -Ports @('445')");
+        builder.AppendLine("    Add-PsfRule -RuleName 'PSF-NetBIOS-In-TCP' -Protocol TCP -Ports @('137','139')");
+        builder.AppendLine("    Add-PsfRule -RuleName 'PSF-NetBIOS-In-UDP' -Protocol UDP -Ports @('137','138')");
+        builder.AppendLine("    Add-PsfRule -RuleName 'PSF-RPC-In-TCP' -Protocol TCP -Ports @('135')");
         if (allowRpcDynamicPorts)
         {
-            builder.AppendLine("Add-PsfRule -RuleName 'PSF-RPC-Dynamic-In-TCP' -Protocol TCP -Ports '49152-65535'");
+            builder.AppendLine("    Add-PsfRule -RuleName 'PSF-RPC-Dynamic-In-TCP' -Protocol TCP -Ports @('49152-65535')");
         }
 
-        builder.AppendLine("Add-PsfRule -RuleName 'PSF-WSDAPI-In-TCP' -Protocol TCP -Ports '5357,5358'");
-        builder.AppendLine("Add-PsfRule -RuleName 'PSF-WSD-Discovery-In-UDP' -Protocol UDP -Ports '3702,5353,5355'");
+        builder.AppendLine("    Add-PsfRule -RuleName 'PSF-WSDAPI-In-TCP' -Protocol TCP -Ports @('5357','5358')");
+        builder.AppendLine("    Add-PsfRule -RuleName 'PSF-WSD-Discovery-In-UDP' -Protocol UDP -Ports @('3702','5353','5355')");
+        builder.AppendLine("}");
         builder.AppendLine("$out -join \"`n\"");
         return builder.ToString();
     }

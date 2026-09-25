@@ -428,23 +428,19 @@ public sealed class SystemSnapshot
                 param([string]$IndirectId, [string[]]$Patterns)
                 $rules = @(Get-NetFirewallRule -Group $IndirectId -ErrorAction SilentlyContinue)
                 if ($rules.Count -gt 0) { return $rules }
-                return @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object {
-                    $group = [string]$_.Group
-                    if (-not $group) { return $false }
-                    if ($group -eq $IndirectId) { return $true }
-                    foreach ($pattern in $Patterns) { if ($group -like $pattern) { return $true } }
-                    return $false
-                })
+                # 只按显示组名再试一次，不做全量枚举（枚举在部分机器上要 10 秒以上）
+                return @(Get-NetFirewallRule -DisplayGroup $Patterns -ErrorAction SilentlyContinue)
             }
             try {
-                $all = @(Get-NetFirewallRule -ErrorAction Stop)
+                # 先用便宜的调用探测权限，避免为了判断权限而枚举全部防火墙规则（很慢）
+                $null = Get-NetFirewallProfile -ErrorAction Stop
                 $fp = @(Get-FirewallGroupRules -IndirectId '@FirewallAPI.dll,-32752' -Patterns @('*File and Printer Sharing*','*文件和打印机共享*'))
                 $nd = @(Get-FirewallGroupRules -IndirectId '@FirewallAPI.dll,-32753' -Patterns @('*Network Discovery*','*网络发现*'))
                 $result.fileAndPrinterEnabled = @($fp | Where-Object { $_.Enabled -eq 'True' }).Count
                 $result.fileAndPrinterTotal = $fp.Count
                 $result.discoveryEnabled = @($nd | Where-Object { $_.Enabled -eq 'True' }).Count
                 $result.discoveryTotal = $nd.Count
-                $result.custom = @($all | Where-Object { [string]$_.Group -eq 'PrinterShareFixer' } | Select-Object DisplayName,Enabled)
+                $result.custom = @(Get-NetFirewallRule -Group 'PrinterShareFixer' -ErrorAction SilentlyContinue | Select-Object DisplayName,Enabled)
             } catch {
                 $result.queryError = $_.Exception.Message
             }

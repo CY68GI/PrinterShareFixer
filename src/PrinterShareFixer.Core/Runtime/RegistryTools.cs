@@ -139,6 +139,22 @@ public sealed class RegistryTools(ILogSink log)
     /// <summary>用 reg.exe 导出注册表项，便于出问题时回滚。</summary>
     public (bool Ok, string Message) TryExportKey(string subKey, string directory)
     {
+        // 先判断注册表项是否存在：不存在时直接跳过，不必调用 reg.exe
+        // （reg.exe 的中文报错是本地代码页输出，读进来会是乱码，也没有信息量）
+        try
+        {
+            using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+            using var probe = baseKey.OpenSubKey(subKey);
+            if (probe is null)
+            {
+                return (false, "该注册表项当前不存在，无需备份");
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, $"无法读取该注册表项：{ex.Message}");
+        }
+
         var safeName = subKey.Replace('\\', '_');
         var target = Path.Combine(directory, $"HKLM_{safeName}.reg");
         var result = ProcessRunner.RunAsync(
@@ -154,7 +170,7 @@ public sealed class RegistryTools(ILogSink log)
             return (true, target);
         }
 
-        return (false, result.ErrorSummary);
+        return (false, $"导出失败（退出代码 {result.ExitCode}）");
     }
 
     private static string Describe(int? value) => value?.ToString() ?? "(未设置)";

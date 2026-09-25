@@ -34,17 +34,19 @@ public static class ProcessRunner
         string fileName,
         IEnumerable<string> arguments,
         CancellationToken cancellationToken = default,
-        int timeoutMilliseconds = 300_000)
+        int timeoutMilliseconds = 300_000,
+        Encoding? outputEncoding = null)
     {
         var argumentList = arguments.ToList();
+        var encoding = outputEncoding ?? Encoding.UTF8;
         var startInfo = new ProcessStartInfo(fileName)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
+            StandardOutputEncoding = encoding,
+            StandardErrorEncoding = encoding,
         };
 
         foreach (var argument in argumentList)

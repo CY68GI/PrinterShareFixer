@@ -26,7 +26,7 @@ internal static class RoleSteps
                     $out = New-Object System.Collections.Generic.List[string]
                     $printers = @(Get-Printer -ErrorAction SilentlyContinue | Where-Object { $_.Shared -eq $true })
                     if ($printers.Count -eq 0) {
-                        $out.Add("ERR|本机共享打印机|没有检测到已共享的打印机，请在“打印机属性 → 共享”里勾选共享")
+                        $out.Add("ERR|本机共享打印机|没有检测到已共享的打印机，请在【打印机属性 - 共享】里勾选共享")
                     } else {
                         foreach ($p in $printers) {
                             $out.Add("OK|$($p.Name)|共享名 $($p.ShareName)，驱动 $($p.DriverName)")
@@ -217,7 +217,7 @@ internal static class RoleSteps
             if ($ok) {
                 $out.Add("OK|TCP $port|端口可达")
             } elseif ($port -eq 445) {
-                $out.Add("ERR|TCP 445|不通：对方未放行“文件和打印机共享”，或被安全软件、路由器拦截")
+                $out.Add("ERR|TCP 445|不通：对方未放行【文件和打印机共享】，或被安全软件、路由器拦截")
             } else {
                 $out.Add("ERR|TCP 135|不通：对方的 RPC 端口被拦截，连接共享打印机需要它")
             }
