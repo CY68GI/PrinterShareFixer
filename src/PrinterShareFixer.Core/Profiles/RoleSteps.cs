@@ -30,6 +30,14 @@ internal static class RoleSteps
                     } else {
                         foreach ($p in $printers) {
                             $out.Add("OK|$($p.Name)|共享名 $($p.ShareName)，驱动 $($p.DriverName)")
+                            $share = [string]$p.ShareName
+                            if (-not $share) {
+                                $out.Add("WARN|$($p.Name)|没有共享名，客户端无法连接，请在【打印机属性 - 共享】里确认共享名")
+                            } elseif ($share.Length -gt 32) {
+                                $out.Add("WARN|共享名 $share|长度超过 32 个字符；部分 Windows 11 客户端连接时会报 0x00000709（打印机名称无效），建议改成简短英文名")
+                            } elseif ($share -match '[^\x20-\x7E]' -or $share -match '\s' -or $share -match '[\(\)\+]') {
+                                $out.Add("WARN|共享名 $share|含空格、中文或特殊字符；部分 Windows 11 客户端连接时会报 0x00000709（打印机名称无效），建议在【打印机属性 - 共享】里改成纯英文名，例如 LenovoM7615")
+                            }
                         }
                     }
                     $folders = @(Get-SmbShare -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.EndsWith('$') })
@@ -106,9 +114,9 @@ internal static class RoleSteps
                 var target = context.Options.TargetHost?.Trim();
                 if (string.IsNullOrWhiteSpace(target))
                 {
-                    return StepResult.Note(
+                    return StepResult.Warn(
                         "没有填写目标电脑名称或 IP，只刷新了名称解析缓存。",
-                        "在界面上填入接打印机那台电脑的名称或 IP，重新修复时会一并断开本机到它的旧连接。");
+                        "在界面上填入接打印机那台电脑的名称或 IP，重新修复时会一并断开本机到它的旧连接（连接报 0x00000040 / 0x00000709 时建议一定要填）。");
                 }
 
                 var script = SmbSessionScriptTemplate.Replace("__TARGET__", target.Replace("'", "''"));
@@ -254,9 +262,9 @@ internal static class RoleSteps
                 var target = context.Options.TargetHost?.Trim();
                 if (string.IsNullOrWhiteSpace(target))
                 {
-                    return StepResult.Note(
+                    return StepResult.Warn(
                         "没有填写目标电脑名称或 IP，已跳过连通性测试。",
-                        "在界面上填入接打印机的那台电脑的名称或 IP（例如 PC-01 或 192.168.1.10），重新修复时会自动测试。");
+                        "在界面上填入接打印机的那台电脑的名称或 IP（例如 PC-01 或 192.168.1.10）；连接报错时这一步能直接指出卡在哪一层（名称解析 / 端口 / 共享名）。");
                 }
 
                 var script = ConnectivityScriptTemplate.Replace("__TARGET__", target.Replace("'", "''"));
@@ -308,6 +316,22 @@ internal static class RoleSteps
             $code = $LASTEXITCODE
             if ($code -eq 0 -and $view -match '\S') {
                 $out.Add("OK|共享列表|$target 上有可见的共享资源")
+
+                # 顺便检查共享名是否“客户端友好”：空格/中文/过长在部分 Windows 11 客户端上会报 0x00000709
+                foreach ($line in ($view -split "`n")) {
+                    $trimmed = $line.Trim()
+                    if (-not $trimmed) { continue }
+                    if ($trimmed -match '^-+' -or $trimmed -match '共享名|Share name|命令成功完成|The command completed') { continue }
+                    $name = ($trimmed -split '\s+')[0]
+                    if (-not $name) { continue }
+                    if ($name.Length -gt 32) {
+                        $out.Add("WARN|共享名 $name|超过 32 个字符，部分 Windows 11 客户端连接时会报 0x00000709，建议在服务端改成简短英文名")
+                    } elseif ($name -match '[^\x20-\x7E]' -or $name -match '[\(\)\+]') {
+                        $out.Add("WARN|共享名 $name|含中文或特殊字符，部分 Windows 11 客户端连接时会报 0x00000709（打印机名称无效），建议在服务端改成纯英文名")
+                    } else {
+                        $out.Add("OK|共享名 $name|名称格式看起来正常")
+                    }
+                }
             } else {
                 $hint = switch ($code) {
                     2     { '找不到这台电脑：名称或 IP 填错了，或者对方不在这个网段' }

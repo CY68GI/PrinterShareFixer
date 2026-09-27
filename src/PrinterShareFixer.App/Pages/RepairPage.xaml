@@ -197,7 +197,7 @@
                             MaxWidth="420"
                             HorizontalAlignment="Left" />
                         <TextBlock
-                            Text="填了之后，修复的最后一步会自动测试连通性（ping、445 端口、135 端口、共享列表），直接告诉你卡在哪一环。"
+                            Text="强烈建议填写：修复的最后一步会自动测试连通性（ping、445、135、共享列表、共享名是否规范）；连接报 0x00000709 / 0x00000040 时必须填，否则这两项检查会被跳过。"
                             TextWrapping="Wrap"
                             Style="{StaticResource CaptionTextBlockStyle}"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
