@@ -1,10 +1,12 @@
 <#
-    Extracts every embedded PowerShell script from the Core sources and feeds it
-    to the PowerShell parser, so that syntax problems (smart quotes, missing
-    brackets, ...) are caught at build time instead of at runtime.
+    Extracts every embedded PowerShell script from the Core sources and feeds it to
+    the PowerShell parser, so syntax problems (smart quotes, missing brackets,
+    unbalanced braces, bad pipelines, ...) are caught at build time instead of runtime.
 
-    This file is intentionally ASCII-only: Windows PowerShell 5.1 reads .ps1
-    files without a BOM using the ANSI code page, which corrupts non-ASCII text.
+    Handles plain raw strings ("""...""") and interpolated raw strings ($"""..."""):
+    for the interpolated ones the C# escapes {{ }} and {placeholders} are normalised first.
+
+    This file is intentionally ASCII-only.
 #>
 $ErrorActionPreference = 'Stop'
 
@@ -13,18 +15,33 @@ $files = @(
     "$root\src\PrinterShareFixer.Core\Profiles\CommonSteps.cs"
     "$root\src\PrinterShareFixer.Core\Profiles\RoleSteps.cs"
     "$root\src\PrinterShareFixer.Core\Runtime\SystemSnapshot.cs"
+    "$root\src\PrinterShareFixer.Core\Diagnostics\DiagnosticReport.cs"
 )
 
 $total = 0
 $bad = 0
+$normalised = 0
 
 foreach ($file in $files) {
     $text = Get-Content -LiteralPath $file -Raw -Encoding UTF8
-    $matches = [regex]::Matches($text, '(?s)"""\r?\n(?<body>.*?)\r?\n\s*"""')
+    $blocks = [regex]::Matches($text, '(?s)(?<interp>\$?)"""\r?\n(?<body>.*?)\r?\n\s*"""')
     $index = 0
-    foreach ($match in $matches) {
+    foreach ($block in $blocks) {
         $index++
-        $script = $match.Groups['body'].Value -replace '__TARGET__', 'PC-TEST'
+        $script = $block.Groups['body'].Value
+
+        $dollars = $block.Groups['dollars'].Value
+        if ($dollars -eq '$') {
+            $normalised++
+            $script = $script.Replace('{{', '{').Replace('}}', '}')
+            $script = [regex]::Replace($script, '\{[A-Za-z_][A-Za-z0-9_]*\}', '123')
+        } elseif ($dollars -eq '$$') {
+            $normalised++
+            $script = [regex]::Replace($script, '\{\{[A-Za-z_][A-Za-z0-9_]*\}\}', '123')
+        }
+
+        $script = $script -replace '__TARGET__', 'PC-TEST'
+
         $tokens = $null
         $errors = $null
         [System.Management.Automation.Language.Parser]::ParseInput($script, [ref]$tokens, [ref]$errors) | Out-Null
@@ -47,6 +64,7 @@ foreach ($file in $files) {
 }
 
 Write-Host ""
+Write-Host ("interpolated blocks normalised: " + $normalised)
 if ($bad -eq 0) {
     Write-Host "OK: $total embedded scripts, no syntax errors." -ForegroundColor Green
 } else {

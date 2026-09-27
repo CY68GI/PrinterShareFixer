@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Media;
 using PrinterShareFixer.App.ViewModels;
 using PrinterShareFixer.Core;
 using PrinterShareFixer.Core.Models;
+using PrinterShareFixer.Core.Diagnostics;
 using PrinterShareFixer.Core.Profiles;
 using PrinterShareFixer.Core.Runtime;
 
@@ -200,6 +201,64 @@ public sealed partial class RepairPage : Page
     private async void OnWindows11Click(object sender, RoutedEventArgs e) => await RunRepairAsync("win11");
 
     private void OnCancelClick(object sender, RoutedEventArgs e) => _cancellation?.Cancel();
+
+    /// <summary>生成详细诊断报告（服务端/客户端都可用）。</summary>
+    private async void OnDiagnoseClick(object sender, RoutedEventArgs e)
+    {
+        if (_running)
+        {
+            return;
+        }
+
+        DiagnoseButton.IsEnabled = false;
+        DetectRing.IsActive = true;
+        StatusText.Text = "正在生成诊断报告：这一步会读取大量系统信息，通常需要 1-2 分钟…";
+
+        try
+        {
+            var options = new DiagnosticOptions
+            {
+                Role = _role,
+                TargetHost = string.IsNullOrWhiteSpace(TargetHostBox.Text) ? null : TargetHostBox.Text.Trim(),
+                TryConnectPrinter = _role == RepairRole.Consumer,
+            };
+
+            var progress = new Progress<string>(stage =>
+                StatusText.Text = $"正在生成诊断报告：{stage}…");
+
+            var result = await DiagnosticReport.GenerateAsync(options, progress);
+
+            StatusText.Text = $"诊断报告已生成：{result.FilePath}";
+            ResultInfoBar.Severity = InfoBarSeverity.Success;
+            ResultInfoBar.Title = "诊断报告已生成";
+            ResultInfoBar.Message = $"文件：{result.FilePath}";
+            ResultInfoBar.IsOpen = true;
+            _state.Log.Write($"诊断报告已生成：{result.FilePath}");
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{result.FilePath}\"") { UseShellExecute = true });
+            }
+            catch
+            {
+                // 打不开资源管理器时忽略
+            }
+        }
+        catch (Exception ex)
+        {
+            _state.Log.Write($"生成诊断报告失败：{ex}");
+            ResultInfoBar.Severity = InfoBarSeverity.Error;
+            ResultInfoBar.Title = "生成诊断报告失败";
+            ResultInfoBar.Message = ex.Message;
+            ResultInfoBar.IsOpen = true;
+            StatusText.Text = "生成诊断报告失败，详情见日志。";
+        }
+        finally
+        {
+            DetectRing.IsActive = false;
+            DiagnoseButton.IsEnabled = true;
+        }
+    }
 
     private RepairOptions BuildOptions() => new()
     {

@@ -1,6 +1,7 @@
 using System.Text;
 using PrinterShareFixer.Core;
 using PrinterShareFixer.Core.Models;
+using PrinterShareFixer.Core.Diagnostics;
 using PrinterShareFixer.Core.Profiles;
 using PrinterShareFixer.Core.Runtime;
 using PrinterShareFixer.Core.Update;
@@ -29,6 +30,7 @@ internal static class Program
                 "run" => await RunAsync(args).ConfigureAwait(false),
                 "version" => Version(args),
                 "update" => await UpdateAsync(args).ConfigureAwait(false),
+                "diag" => await DiagnoseAsync(args).ConfigureAwait(false),
                 "help" or "-h" or "--help" => Help(),
                 _ => Unknown(command),
             };
@@ -48,6 +50,8 @@ internal static class Program
             psfix detect                     检测当前机器的打印机共享相关状态（只读）
             psfix version [--markdown]       显示版本号与各版本更新内容（--markdown 输出 GitHub 用的 Markdown）
             psfix update [--stage]           检查 GitHub 上的最新版本；--stage 会下载并解压到临时目录（不替换当前程序）
+            psfix diag [--role provider|consumer] [--target <电脑名或IP>] [--no-connect]
+                                             生成详细诊断报告（系统/网络/SMB/注册表/打印机/事件日志/连接尝试）
             psfix plan <方案>                打印修复方案包含的步骤与等价命令
             psfix run <方案> [--yes] [--target <电脑名或IP>] [--opt key=value ...]
                                              执行修复（默认只做预演，加 --yes 才真正执行，需要管理员权限）
@@ -78,6 +82,51 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>生成详细诊断报告（psfix diag）。</summary>
+    private static async Task<int> DiagnoseAsync(string[] args)
+    {
+        var role = RepairRoleExtensions.ParseRole(GetOption(args, "--role"));
+        var target = GetOption(args, "--target");
+        var skipConnect = args.Any(arg => arg.Equals("--no-connect", StringComparison.OrdinalIgnoreCase));
+
+        Console.WriteLine($"{AppInfo.ProductName} v{AppInfo.Version} 详细诊断报告");
+        Console.WriteLine($"  本机角色：{role.ToDisplayName()}");
+        Console.WriteLine($"  目标电脑：{target ?? "（未填写）"}");
+        Console.WriteLine();
+
+        var progress = new Progress<string>(stage => Console.WriteLine($"  ... {stage}"));
+
+        try
+        {
+            var result = await DiagnosticReport.GenerateAsync(
+                new DiagnosticOptions
+                {
+                    Role = role,
+                    TargetHost = target,
+                    TryConnectPrinter = !skipConnect && role == RepairRole.Consumer,
+                },
+                progress).ConfigureAwait(false);
+
+            Console.WriteLine();
+            Console.WriteLine($"报告已生成：{result.FilePath}");
+            if (result.Highlights.Count > 0)
+            {
+                Console.WriteLine();
+                Console.WriteLine("自动判断：");
+                foreach (var line in result.Highlights)
+                {
+                    Console.WriteLine($"  · {line}");
+                }
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"生成诊断报告失败：{ex.Message}");
+            return 1;
+        }
+    }
     private static async Task<int> UpdateAsync(string[] args)
     {
         var stage = args.Any(arg => arg.Equals("--stage", StringComparison.OrdinalIgnoreCase));

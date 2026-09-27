@@ -11,6 +11,8 @@ public static class AppPaths
 
     public static string BackupDirectory => Path.Combine(Root, "Backups");
 
+    public static string DiagnosticDirectory => Path.Combine(Root, "Diagnostics");
+
     public static string EnsureLogDirectory()
     {
         Directory.CreateDirectory(LogDirectory);
@@ -22,6 +24,12 @@ public static class AppPaths
         var path = Path.Combine(BackupDirectory, stamp);
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    public static string EnsureDiagnosticDirectory()
+    {
+        Directory.CreateDirectory(DiagnosticDirectory);
+        return DiagnosticDirectory;
     }
 
     private static string ResolveRoot()

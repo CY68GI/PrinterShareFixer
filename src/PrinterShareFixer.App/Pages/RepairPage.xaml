@@ -352,6 +352,7 @@
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                 <Button x:Name="CancelButton" Content="取消" Click="OnCancelClick" Visibility="Collapsed" />
+                <Button x:Name="DiagnoseButton" Content="生成诊断报告" Click="OnDiagnoseClick" />
                 <Button x:Name="RefreshButton" Content="重新检测" Click="OnRefreshClick" />
             </StackPanel>
         </Grid>
